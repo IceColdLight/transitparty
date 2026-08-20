@@ -52,6 +52,8 @@
       #race .od .from { color: #7fe08a; }
       #race .od .to { color: #ffd166; }
       #race .od .arrow { color: #7f8f9c; margin: 0 8px; }
+      #race .wrap { font-size: 13px; font-weight: 700; letter-spacing: 0.4px;
+                    color: #ff8f6b; margin-top: 3px; }
       #race .clock { font-size: 24px; font-weight: 800; letter-spacing: 1.5px;
         font-variant-numeric: tabular-nums; line-height: 1.1; }
       #race .par { font-size: 10px; letter-spacing: 1.2px; color: #7f8f9c; text-transform: uppercase; }
@@ -175,6 +177,9 @@
       <div class="od"><span class="from" id="od-from">—</span><span class="arrow">→</span><span class="to" id="od-to">—</span></div>
       <div class="clock" id="clock">0:00</div>
       <div class="par" id="par">&nbsp;</div>
+      <!-- Only ever visible once somebody has finished. There is no round
+           timer; this is the two minutes everybody else has to come in. -->
+      <div class="wrap" id="wrap" style="display:none"></div>
     </div>
 
     <div id="crosshair"></div>

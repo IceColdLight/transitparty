@@ -49,6 +49,8 @@ export type MoveInput = {
   wx: number; wy: number; sprint: boolean; jump: boolean;
   /** vertical wish while flying */
   lift?: number;
+  /** flight boost. Ignored on foot. */
+  boost?: boolean;
 };
 
 /** Everything the step needs to know about the world it is stepping through. */
@@ -125,7 +127,12 @@ export function stepBody(p: Body, input: MoveInput, dt: number, g: Ground): void
    * rules below — streets, bodywork, cabin walls, decks — get a say.
    */
   if (p.flying) {
-    const speed = WALK.speed * (input.sprint ? 5 : 2.2);
+    /**
+     * Three gears, because the city is three kilometres across and the point
+     * of flying is to get to the other end of it and look at something. Ctrl
+     * is the one that crosses the map in seconds; shift is for closing in.
+     */
+    const speed = WALK.speed * (input.boost ? 22 : input.sprint ? 5 : 2.2);
     p.riding = null;
     p.grounded = false;
     p.vx = 0; p.vy = 0; p.vh = 0;

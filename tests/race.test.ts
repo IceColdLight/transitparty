@@ -74,9 +74,11 @@ const boards = runs.filter(Boolean).map((r) => r!.boards);
 note(`journey: avg ${avg(times).toFixed(0)}s, range ${Math.min(...times).toFixed(0)}–${Math.max(...times).toFixed(0)}s`);
 note(`of which waiting: avg ${avg(waits).toFixed(0)}s over ${avg(boards).toFixed(1)} boardings`);
 
-check('a perfect run always fits inside the round timer',
-  Math.max(...times) < RACE.roundSeconds,
-  `worst ${Math.max(...times).toFixed(0)}s of ${RACE.roundSeconds}s`);
+// No round timer to fit inside — a round ends when it is won. What still has
+// to hold is that a followed route lands near the number the planner quoted.
+check('a perfect run comes in near par, not wildly over it',
+  Math.max(...times) < RACE.parMax * 1.6,
+  `worst ${Math.max(...times).toFixed(0)}s against a par ceiling of ${RACE.parMax}s`);
 
 const walks = cities.map((c) => c.par.walk);
 const beat = times.map((t, i) => walks[i] / t);

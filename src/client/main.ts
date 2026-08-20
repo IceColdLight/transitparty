@@ -16,7 +16,7 @@
  * decides — see shared/movement.ts.
  */
 import * as THREE from 'three';
-import { INTERP_DELAY_MS, PLAYER, RACE, STAMINA } from '../shared/constants.js';
+import { INTERP_DELAY_MS, PLAYER, STAMINA } from '../shared/constants.js';
 import { buildCity } from '../shared/city.js';
 import { type Body, newBody, stepBody } from '../shared/movement.js';
 import { allVehicles, toLocal, toWorld, vehicleById } from '../shared/vehicles.js';
@@ -32,6 +32,7 @@ const interpDelay = (Number(params.get('delay')) || INTERP_DELAY_MS) / 1000;
 
 const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const odFrom = el('od-from'), odTo = el('od-to'), clockEl = el('clock'), parEl = el('par');
+const wrapEl = el('wrap');
 const standingsEl = el('standings'), promptEl = el('prompt');
 const netEl = el('status-net');
 const nameEl = el<HTMLInputElement>('name');
@@ -361,12 +362,14 @@ function frame(now: number) {
   const wish = canMove ? walkWish() : { x: 0, y: 0 };
   const sprint = canMove && held('shift');
   const jump = canMove && held(' ');
+  // Flight only, and mentioned nowhere: ctrl crosses the city in seconds.
+  const boost = me.flying && canMove && held('control');
   // While flying, W/S follow where you are LOOKING, and the pitch of that look
   // is the climb — which is the whole reason to be up there.
   const lift = me.flying && canMove
     ? (held(' ') ? 1 : 0) - (held('shift') ? 1 : 0) || Math.sin(pitch) * (held('w') ? 1 : held('s') ? -1 : 0)
     : 0;
-  stepBody(me, { wx: wish.x, wy: wish.y, sprint, jump, lift }, dt, {
+  stepBody(me, { wx: wish.x, wy: wish.y, sprint, jump, lift, boost }, dt, {
     streets: c.streets, river: c.river, transit: { city: c, vehicles, time: simTime },
   });
 
@@ -418,7 +421,7 @@ function frame(now: number) {
 
   net.send({
     type: 'walk', seq: 0, wx: wish.x, wy: wish.y, facing,
-    sprint, jump, lift,
+    sprint, jump, lift, boost,
   });
 
   // ── camera ──────────────────────────────────────────────────────────────
@@ -466,6 +469,11 @@ function frame(now: number) {
   odTo.textContent = dest.name;
   clockEl.textContent = fmt(racing ? curr.round.elapsed : 0);
   parEl.textContent = `par ${fmt(c.par.time)} · ${c.par.transfers} changes`;
+  // Nothing here until the race has been won. Then it is the only clock that
+  // matters, so it says who won as well as how long is left.
+  const wrap = racing ? curr.round.wrap : null;
+  wrapEl.style.display = wrap === null ? 'none' : '';
+  if (wrap !== null) wrapEl.textContent = `round ends in ${Math.ceil(wrap)}s`;
 
   const aboard = me.riding ? vehicleById(c, me.riding, simTime) : null;
   if (aboard) {
@@ -524,7 +532,7 @@ function frame(now: number) {
       `<span class="dot" style="background:${p.color}"></span>` +
       `<span class="nm">${p.name}</span>` +
       `<span class="tm">${p.finished !== null ? fmt(p.finished) : 'DNF'}</span></div>`).join('');
-    rNext.textContent = `next city in ${Math.max(0, Math.ceil(RACE.intermissionSeconds - curr.round.elapsed))}s`;
+    rNext.textContent = `next city in ${Math.max(0, Math.ceil(curr.round.wrap ?? 0))}s`;
   } else resultsEl.style.display = 'none';
 }
 requestAnimationFrame(frame);

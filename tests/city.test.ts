@@ -50,9 +50,16 @@ check('par lands inside the window on every seed',
   `${Math.min(...pars).toFixed(0)}–${Math.max(...pars).toFixed(0)}s, ` +
   `window ${RACE.parMin}–${RACE.parMax}, avg ${avg(pars).toFixed(0)}s`);
 
-check('par fits inside the round timer with room to be bad at it',
-  Math.max(...pars) < RACE.roundSeconds * 0.85,
-  `worst par ${Math.max(...pars).toFixed(0)}s of ${RACE.roundSeconds}s`);
+/**
+ * Nothing ends a round but somebody winning it, so there is no round timer to
+ * fit inside any more. What has to hold instead is that the two minutes the
+ * rest of the field get after the first finisher are worth having: a player
+ * who is a whole par-journey's worth of mistakes behind is not owed a place,
+ * but somebody who missed one connection is.
+ */
+check('the wrap-up window is a real second chance, not a formality',
+  RACE.wrapSeconds > Math.max(...pars) * 0.6,
+  `${RACE.wrapSeconds}s against a worst par of ${Math.max(...pars).toFixed(0)}s`);
 
 const ratios = cities.map((c) => c.par.walk / c.par.time);
 check('riding always beats walking by the required margin',

@@ -173,10 +173,14 @@ export type RoundState = {
   seed: number;
   index: number;
   phase: 'racing' | 'intermission';
+  /**
+   * Seconds left before the round is called, or null while nobody has
+   * finished — which is most of a round. A race is ended by somebody winning
+   * it, not by a clock.
+   */
+  wrap: number | null;
   /** seconds elapsed in the current phase */
   elapsed: number;
-  /** seconds this phase runs for */
-  duration: number;
 };
 
 export type WorldState = {
@@ -199,6 +203,8 @@ export type C2SWalk = {
   jump: boolean;
   /** vertical wish while flying: +1 rising, -1 descending, 0 holding height */
   lift: number;
+  /** holding the boost key. Flight only — on foot it does nothing at all. */
+  boost: boolean;
 };
 
 /**

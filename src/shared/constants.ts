@@ -523,15 +523,20 @@ export const FLEET = {
 
 export const RACE = {
   /**
-   * Hard stop on a round, in case somebody wanders off.
+   * How long the rest of the field gets once somebody has finished.
    *
-   * Generous, and more so since the game went first person. `par` is a
-   * planner's number: it costs the ride and the wait and says nothing about
-   * finding the platform, misjudging a gap, or being carried two stops past
-   * your change because you were looking the wrong way. Ending a round on the
-   * clock is a failure of the timer, not of the player.
+   * There is no round timer any more, and that is deliberate. A hard stop on
+   * the clock has to be set against the worst case — somebody who has taken a
+   * wrong bus and is walking back — so it is always far longer than any round
+   * actually needs, which means it never does anything except sit there
+   * counting down at people who are doing fine. What actually ends a round is
+   * that somebody won it. Everyone else gets two minutes to come in.
+   *
+   * ABSOLUTE seconds, like `dwell` and `intermissionSeconds`: it is a
+   * concession to the people still travelling, and a person's patience does
+   * not speed up because the trams do.
    */
-  roundSeconds: 900 / TEMPO,
+  wrapSeconds: 120,
   /**
    * Results on screen between rounds. Absolute seconds, like `dwell` — reading
    * a scoreboard is a human task and does not get faster because the trams do.

@@ -28,6 +28,7 @@ type Client = {
   sprint: boolean;
   jump: boolean;
   lift: number;
+  boost: boolean;
 };
 
 const clients = new Map<string, Client>();
@@ -45,6 +46,11 @@ let roundIndex = 1;
 let phase: 'racing' | 'intermission' = 'racing';
 let elapsed = 0;
 let finishers = 0;
+/**
+ * When the first player crossed the line, or null while the race is still
+ * open. It is the only thing that puts a clock on a round.
+ */
+let firstFinish: number | null = null;
 /** Sim clock in seconds. Only ever advanced in exact fixed steps. */
 let time = 0;
 
@@ -92,6 +98,7 @@ function startRound() {
   phase = 'racing';
   elapsed = 0;
   finishers = 0;
+  firstFinish = null;
   for (const p of players.values()) spawn(p);
   const s = city.stops[city.origin], d = city.stops[city.destination];
   console.log(
@@ -133,6 +140,7 @@ function tick(dt: number) {
     stepBody(body, {
       wx: c?.wx ?? 0, wy: c?.wy ?? 0,
       sprint: c?.sprint ?? false, jump: c?.jump ?? false, lift: c?.lift ?? 0,
+      boost: c?.boost ?? false,
     }, dt, ground);
 
     p.x = body.x; p.y = body.y; p.h = body.h;
@@ -156,8 +164,19 @@ function tick(dt: number) {
     }
   }
 
+  /**
+   * A round ends when it has been WON, not when a clock runs out.
+   *
+   * The old hard stop had to be set against the worst case — somebody who has
+   * taken the wrong bus and is walking back — so it was always far longer than
+   * any round needed and spent the whole time counting down at people who were
+   * doing fine. Now nothing is counting until somebody crosses the line, and
+   * then everybody else has two minutes to come in.
+   */
   const racing = [...players.values()].filter((p) => p.finished === null);
-  if ((players.size > 0 && racing.length === 0) || elapsed >= RACE.roundSeconds) endRound();
+  if (firstFinish === null && finishers > 0) firstFinish = elapsed;
+  if (players.size > 0 && racing.length === 0) endRound();
+  else if (firstFinish !== null && elapsed - firstFinish >= RACE.wrapSeconds) endRound();
 }
 
 function snapshot(): WorldState {
@@ -168,7 +187,11 @@ function snapshot(): WorldState {
       index: roundIndex,
       phase,
       elapsed,
-      duration: phase === 'racing' ? RACE.roundSeconds : RACE.intermissionSeconds,
+      wrap: phase === 'racing' && firstFinish !== null
+        ? Math.max(0, RACE.wrapSeconds - (elapsed - firstFinish))
+        : (phase === 'intermission'
+          ? Math.max(0, RACE.intermissionSeconds - elapsed)
+          : null),
     },
     players: [...players.values()],
   };
@@ -188,7 +211,9 @@ wss.on('connection', (socket) => {
     stamina: 1, sprinting: false, flying: false, finished: null, place: 0,
   };
   players.set(id, player);
-  clients.set(id, { id, socket, wx: 0, wy: 0, facing: 0, sprint: false, jump: false, lift: 0 });
+  clients.set(id, {
+    id, socket, wx: 0, wy: 0, facing: 0, sprint: false, jump: false, lift: 0, boost: false,
+  });
   spawn(player);
 
   const send = (m: S2CMessage) => socket.send(JSON.stringify(m));
@@ -208,6 +233,7 @@ wss.on('connection', (socket) => {
       c.sprint = !!msg.sprint;
       c.jump = !!msg.jump;
       c.lift = Math.max(-1, Math.min(1, msg.lift ?? 0));
+      c.boost = !!msg.boost;
     } else if (msg.type === 'action') {
       /**
        * Debug only. It is server-side because the server owns position: a

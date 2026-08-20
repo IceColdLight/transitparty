@@ -460,10 +460,10 @@ right.
 
 Compressing time rather than shrinking the city is what keeps every ratio the
 design was tuned around: walking is still the same multiple worse than riding,
-a transfer still costs the same fraction of a journey, par sits the same
-distance from the round timer.
+a transfer still costs the same fraction of a journey, and par sits the same
+distance from the walk it has to beat.
 
-**Two things deliberately do not scale, and both are human rather than
+**Three things deliberately do not scale, and all three are human rather than
 mechanical:**
 
 - **`dwell`** — the seconds a vehicle stands with its doors open. It is your
@@ -473,6 +473,8 @@ mechanical:**
   coin toss. `tests/vehicles.test.ts` holds the floor in absolute seconds
   precisely so somebody "tidying up" cannot scale it.
 - **`intermissionSeconds`** — reading a scoreboard is not faster on a fast map.
+- **`wrapSeconds`** — the two minutes everybody else gets once the race has
+  been won. See below.
 
 That has one knock-on worth knowing about. Because dwell stays put while
 everything else shrinks, stopping becomes a bigger share of a journey and
@@ -482,6 +484,26 @@ a plain third, par topped out at 132s against a 133s ceiling and the generator
 began rejecting exactly the long multi-change races that are the good ones.
 
 ---
+
+## A round ends when it is won
+
+There is no round timer. There was one, and it was 300 seconds, and it never
+did anything: a hard stop has to be set against the worst case — somebody who
+took the wrong bus and is walking back — so it is always far longer than any
+round actually needs, which means it spends the whole round counting down at
+people who are doing fine.
+
+What ends a round is that somebody crossed the line. Everybody else then has
+`RACE.wrapSeconds` — two minutes — to come in, and that is the only clock the
+HUD ever shows. It is absolute seconds like `dwell`, because it is a
+concession to the people still travelling and patience does not speed up when
+the trams do. `tests/city.test.ts` checks it stays a real second chance
+rather than a formality: comfortably more than half of the worst par, so
+missing one connection does not cost you the round.
+
+The consequence to keep in mind: par is no longer bounded by anything except
+`RACE.parMin/parMax`. If those ever come off, nothing else is holding a round
+to a sane length.
 
 ## Sprinting is a burst, not a gear
 
@@ -603,7 +625,8 @@ the city can actually be read. So:
   cannot read is a name that is not there.
 
 There is also a fly mode for looking at the city — two taps of the space bar,
-mentioned nowhere in the UI. It is server-side, because the server owns
+mentioned nowhere in the UI, with three gears: drifting, shift, and CTRL,
+which crosses the three kilometres in a few seconds. It is server-side, because the server owns
 position and a client flying on its own would spend every tick being pulled
 back down by the correction; and it is the FIRST thing in `stepBody`, so none
 of the rules below it — streets, bodywork, cabin walls, decks — get a say.
