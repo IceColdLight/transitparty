@@ -538,6 +538,30 @@ the average race gained most of a change, from 2.25 to 2.9.
 
 ---
 
+## There is no "you are here"
+
+The map does not show your own position, and every other change in this
+section exists to make that survivable.
+
+A dot on the map turns navigation into following a marker: you never look at
+the city, you look at the pip and steer it. Taking it away makes locating
+yourself the work — and that only becomes a skill rather than a punishment if
+the city can actually be read. So:
+
+- **Every street has a name**, on a plate at every junction, facing down the
+  street it names. Twenty-odd names to a city; the plates share a material per
+  name, because a hundred and sixty junctions would otherwise mean six hundred
+  textures of two dozen words.
+- **Every interchange is labelled on the map**, not just the busiest ones, and
+  the labels are laid out greedily so none is buried under another. A name you
+  cannot read is a name that is not there.
+
+Rivals stay on the map. Watching somebody take the wrong bridge is most of the
+point of racing, and if one is standing next to you and gives your position
+away, that is something you earned by keeping up with them.
+
+---
+
 ## The street shows you nothing about the network
 
 What the street gives you is what a street gives you: roads, buildings, water,

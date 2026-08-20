@@ -468,6 +468,76 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
     add(tunnel, keep(new THREE.MeshLambertMaterial({ color: 0x21252c, side: THREE.BackSide })));
   }
 
+  /**
+   * A name on every corner.
+   *
+   * The map deliberately does not show you where you are standing, so reading
+   * the city is the only way to fix your position — and a city whose streets
+   * have no names cannot be read. One post per junction carrying two plates,
+   * each naming the street it faces down, exactly as a real one does.
+   *
+   * Textures are cached per NAME rather than per plate: a city has twenty-odd
+   * streets and a hundred and sixty junctions, and painting a canvas for each
+   * of three hundred plates would be three hundred textures of the same two
+   * dozen words.
+   */
+  {
+    /**
+     * One material per NAME, not per plate. A city has twenty-odd streets and
+     * a hundred and sixty junctions; painting a canvas for each of six hundred
+     * plates would be six hundred textures of the same two dozen words.
+     */
+    const plates = new Map<string, THREE.MeshBasicMaterial>();
+    const plate = (text: string) => {
+      let m = plates.get(text);
+      if (!m) {
+        m = keep(new THREE.MeshBasicMaterial({
+          map: keep(makeSign(text, [], '#9fb3c8')), fog: true,
+        }));
+        plates.set(text, m);
+      }
+      return m;
+    };
+    const postMat = keep(new THREE.MeshLambertMaterial({ color: 0x2a2f38 }));
+    const postGeo = keep(new THREE.CylinderGeometry(0.07, 0.07, 4.9, 6));
+    // Street-sign sized and mounted above head height, so a corner is
+    // something you glance up at rather than a hoarding in your way.
+    const plateGeo = keep(new THREE.PlaneGeometry(2.7, 0.85));
+    const half = city.streets.width / 2;
+    const MOUNT = 4.1;
+
+    for (let i = 0; i < city.streets.xs.length; i++) {
+      for (let j = 0; j < city.streets.ys.length; j++) {
+        const x = city.streets.xs[i], y = city.streets.ys[j];
+        // On a corner of the junction, clear of the carriageway.
+        const cx = x + (i % 2 === 0 ? 1 : -1) * (half - 2.2);
+        const cy = y + (j % 2 === 0 ? 1 : -1) * (half - 2.2);
+        const post = new THREE.Mesh(postGeo, postMat);
+        post.position.set(cx, 2.45, cy);
+        scene.add(post);
+
+        /**
+         * Each plate faces down the street it names, so you read it walking
+         * along that street — and there are two of them back to back at the
+         * SAME height, a few centimetres apart. Offsetting the second one
+         * vertically instead put two signs on a pole at different heights;
+         * leaving them coplanar makes them z-fight.
+         */
+        const put = (text: string, rot: number, lift: number) => {
+          for (const flip of [0, Math.PI]) {
+            const m = new THREE.Mesh(plateGeo, plate(text));
+            const a = rot + flip;
+            m.position.set(cx - Math.sin(-a) * 0.03, MOUNT + lift, cy - Math.cos(-a) * 0.03);
+            m.rotation.y = a;
+            scene.add(m);
+          }
+        };
+        put(city.streets.xNames[i], 0, 0);
+        put(city.streets.yNames[j], Math.PI / 2, -0.95);
+      }
+    }
+  }
+
   // ── station halls, and the stairs into them ──────────────────────────────
   /**
    * Station surfaces are lit from within rather than by the sun, which does

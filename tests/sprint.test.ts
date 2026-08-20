@@ -16,7 +16,7 @@ import type { Streets } from '../src/shared/streets.js';
 import { check, describe, near, note, report } from './harness.js';
 
 /** An empty plain, to measure the speed model without a building in the way. */
-const OPEN: Streets = { xs: [0], ys: [0], width: 1e7 };
+const OPEN: Streets = { xs: [0], ys: [0], width: 1e7, xNames: ['Nowhere'], yNames: ['Nowhere'] };
 const NO_RIVER: River = { poly: [{ x: -1e6, y: -1e6 }, { x: -1e6, y: 1e6 }], bridges: [] };
 const OPEN_GROUND = { streets: OPEN, river: NO_RIVER, transit: null };
 const STEP = 1 / 60;

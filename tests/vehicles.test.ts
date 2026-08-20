@@ -132,6 +132,11 @@ describe('traffic that does not drive through itself');
     for (let i = 0; i < fleet.length; i++) {
       for (let j = i + 1; j < fleet.length; j++) {
         const a = fleet[i], b2 = fleet[j];
+        // Only things that could actually touch. A metro is eight metres under
+        // the road and a train nine metres over it, so a floor-plan overlap
+        // between two different levels is not a collision, it is a bridge —
+        // and counting them was the whole of this check's remaining noise.
+        if (a.level !== b2.level) continue;
         if (Math.abs(a.x - b2.x) > 50 || Math.abs(a.y - b2.y) > 50) continue;
         pairs++;
         if (!overVehicle(city, a, b2.x, b2.y) && !overVehicle(city, b2, a.x, a.y)) continue;

@@ -111,6 +111,11 @@ minus a bit of drag, so stepping off a tram at full pelt carries you fifteen
 metres and lands you somewhere you did not walk to. Walk to the edge first —
 jumping on the spot in the middle of the deck just puts you back on it.
 
+**The map does not show you where you are.** No dot, no marker — finding
+yourself is the work. Read the street name on the corner, read the name on the
+platform, and find it on the diagram. Rivals *are* on the map, so following one
+is a strategy.
+
 **Hold TAB and read the map.** It shows the whole network and every vehicle on
 it, live, with a legend telling you what each line is, how fast it actually
 travels and how often it comes. It is a physical card you hold up, so while you

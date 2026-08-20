@@ -18,7 +18,7 @@
  * quoting a journey nobody can make.
  */
 import { CITY, PLATFORM } from './constants.js';
-import { type Rng, range } from './rng.js';
+import { type Rng, pick, range } from './rng.js';
 import { type River, illegalCrossing } from './river.js';
 
 export type Pt = { x: number; y: number };
@@ -30,10 +30,31 @@ export type Streets = {
   ys: number[];
   /** carriageway width; you may walk within half of this of a centre line */
   width: number;
+  /**
+   * What each street is called, indexed alongside `xs` and `ys`.
+   *
+   * Not decoration. The map does not show you where you are standing, so the
+   * only way to fix your position is to read the city: the name on the corner
+   * and the name on the station. Take the street names away and the map
+   * becomes a diagram of somewhere you cannot find.
+   */
+  xNames: string[];
+  yNames: string[];
 };
 
 /** A city block. Buildings are solid; parks are solid too, just prettier. */
 export type Block = { x: number; y: number; w: number; h: number; park: boolean };
+
+const STREET_HEADS = [
+  'Linden', 'Kaiser', 'Königs', 'Berg', 'Dom', 'Markt', 'Rosen', 'Alt', 'Neu',
+  'Hafen', 'Mühlen', 'Garten', 'Eichen', 'Birken', 'Sonnen', 'Wald', 'Stein',
+  'Brücken', 'Kirch', 'Schloss', 'Anger', 'Salz', 'Gold', 'Fischer', 'Weiden',
+  'Nord', 'Süd', 'Ost', 'West', 'Ober', 'Unter', 'Klein', 'Groß', 'Hoch',
+];
+const STREET_TAILS = [
+  'straße', 'allee', 'weg', 'damm', 'ring', 'gasse', 'ufer', 'chaussee',
+  'promenade', 'steig', 'zeile', 'pfad',
+];
 
 export function makeStreets(r: Rng): Streets {
   const line = (extent: number) => {
@@ -53,7 +74,26 @@ export function makeStreets(r: Rng): Streets {
    * consequently traffic that drove through itself wherever two routes shared
    * a road.
    */
-  return { xs: line(CITY.width), ys: line(CITY.height), width: 34 };
+  const xs = line(CITY.width), ys = line(CITY.height);
+
+  const used = new Set<string>();
+  const name = (): string => {
+    for (let k = 0; k < 80; k++) {
+      const n = pick(r, STREET_HEADS) + pick(r, STREET_TAILS);
+      if (!used.has(n)) { used.add(n); return n; }
+    }
+    let i = 2;
+    const n = pick(r, STREET_HEADS) + pick(r, STREET_TAILS);
+    while (used.has(`${n} ${i}`)) i++;
+    used.add(`${n} ${i}`);
+    return `${n} ${i}`;
+  };
+
+  return {
+    xs, ys, width: 34,
+    xNames: xs.map(name),
+    yNames: ys.map(name),
+  };
 }
 
 /** Can you stand here? Only if you are on a street. */

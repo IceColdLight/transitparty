@@ -169,16 +169,27 @@ export function drawMap(
     ctx.stroke();
   }
 
-  // ── everybody racing ────────────────────────────────────────────────────
+  /**
+   * Everybody racing EXCEPT you.
+   *
+   * There is no "you are here". A dot on the map turns navigation into
+   * following a marker, and the whole reason the street has names and the
+   * stations have signs is that finding yourself is supposed to be the work.
+   * Read the corner, read the platform, find the name on the diagram.
+   *
+   * Rivals stay. Watching somebody take the wrong bridge is most of the point
+   * of racing, and if one happens to be standing next to you and gives your
+   * position away, that is a thing you had to earn by keeping up with them.
+   */
   for (const pl of players) {
+    if (pl.id === selfId) continue;
     const p = P(pl);
-    const me = pl.id === selfId;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, me ? 7 : 5.5, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, 5.5, 0, Math.PI * 2);
     ctx.fillStyle = pl.color;
     ctx.fill();
-    ctx.lineWidth = me ? 3 : 2;
-    ctx.strokeStyle = me ? '#ffffff' : 'rgba(0,0,0,0.75)';
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(0,0,0,0.75)';
     ctx.stroke();
   }
 
@@ -187,13 +198,37 @@ export function drawMap(
    * a passing tram is sitting on top of is not a name. Interchanges only: a
    * diagram with every station labelled is a wall of text.
    */
+  /**
+   * Names, laid out so they do not sit on top of each other.
+   *
+   * With no marker for yourself on the map, the station name is how you work
+   * out which part of the diagram you are standing in — so every interchange
+   * needs one, and a name buried under another name is no use at all. Busiest
+   * stations get first refusal on the space; anything that would collide is
+   * dropped rather than drawn over.
+   */
   ctx.font = '700 11px system-ui, sans-serif';
   ctx.textAlign = 'left';
-  for (const s of city.stops) {
-    if (s.lines.length < 3 && s.id !== city.origin && s.id !== city.destination) continue;
+  const taken: { x: number; y: number; w: number; h: number }[] = [];
+  const fits = (x: number, y: number, w: number, h: number) => {
+    for (const t of taken) {
+      if (x < t.x + t.w && x + w > t.x && y < t.y + t.h && y + h > t.y) return false;
+    }
+    return true;
+  };
+  const named = city.stops
+    .filter((s) => s.lines.length >= 2 || s.id === city.origin || s.id === city.destination)
+    .sort((a, b) => {
+      const key = (s: typeof a) =>
+        (s.id === city.origin || s.id === city.destination ? 100 : 0) + s.lines.length;
+      return key(b) - key(a);
+    });
+  for (const s of named) {
     const p = S(s.id);
-    // A and B wear a ring and a letter, so their names start further out.
     const off = s.id === city.origin || s.id === city.destination ? 28 : 10;
+    const w = ctx.measureText(s.name).width;
+    if (!fits(p.x + off - 1, p.y - 8, w + 2, 13)) continue;
+    taken.push({ x: p.x + off - 1, y: p.y - 8, w: w + 2, h: 13 });
     ctx.lineWidth = 3.5;
     ctx.strokeStyle = 'rgba(7,10,15,0.95)';
     ctx.strokeText(s.name, p.x + off, p.y + 4);
