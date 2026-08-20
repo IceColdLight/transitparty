@@ -11,6 +11,7 @@
 import { MODES, STAMINA, SUSTAINED_WALK, WALK } from '../src/shared/constants.js';
 import { buildCity } from '../src/shared/city.js';
 import { newBody, stepBody } from '../src/shared/movement.js';
+import { boardingWindow } from '../src/shared/vehicles.js';
 import type { River } from '../src/shared/river.js';
 import type { Streets } from '../src/shared/streets.js';
 import { check, describe, near, note, report } from './harness.js';
@@ -53,13 +54,19 @@ check('sprinting is meaningfully faster than walking',
 /**
  * The number it was sized against: a bus stands for four seconds, so from
  * forty metres out the dash has to land and the walk has to miss.
+ *
+ * It is not four seconds of doorway, though. The doors take a bite out of both
+ * ends of the dwell, and the margin between the dash and what is left is small
+ * enough that the door timings cannot be changed without coming back here.
  */
+const window = boardingWindow('bus', MODES.bus.dwell);
 const dashWalk = 40 / WALK.speed;
 const dashRun = 40 / (WALK.speed * WALK.sprint);
 note(`40m to a closing door: walking ${dashWalk.toFixed(1)}s, running ${dashRun.toFixed(1)}s`);
 check('a full tank buys the dash the doors are worth',
-  dashRun < MODES.bus.dwell && dashWalk > MODES.bus.dwell,
-  `bus doors are open ${MODES.bus.dwell}s`);
+  dashRun < window && dashWalk > window,
+  `${window.toFixed(2)}s of open bus door out of a ${MODES.bus.dwell}s stop, `
+  + `${(window - dashRun).toFixed(2)}s of margin`);
 
 const fromFull = run(20, () => true);
 const reach = WALK.speed * WALK.sprint * STAMINA.burst;

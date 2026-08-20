@@ -427,7 +427,7 @@ function frame(now: number) {
   scene3d.setViewer(camera.position.x, camera.position.y, camera.position.z);
 
   const people = othersAt(simTime - interpDelay, simTime);
-  scene3d.updateVehicles(c, vehicles, dt);
+  scene3d.updateVehicles(c, vehicles);
   scene3d.updatePlayers(people, selfId);
 
   // ── the map in your hands ───────────────────────────────────────────────

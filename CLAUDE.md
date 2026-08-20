@@ -361,11 +361,15 @@ you stood — and getting the conversion wrong is silent in both directions.
 
 Four rules sit on top of it:
 
-- **A vehicle is a room with doors** — real ones, that slide shut when it runs
-  and part when it stops. They were a permanent hole in the bodywork for a
-  long time, which meant the one rule you have to read off a vehicle, can I get
-  out, had no picture at all. On foot the doors are the only way through the
-  walls. They are open exactly while it is standing at a stop. That
+- **A vehicle is a room with doors** — real ones, full height and glazed, that
+  slide shut before the wheels turn and only part once it is standing still.
+  Neither of those is a rule anybody enforces: the openness is a function of
+  the clock like the position is, and it is written so it cannot say anything
+  else. A doorway is a way out only while it is wide enough for a body, which
+  is some way before it looks shut — losing a race to a closing door is the
+  point. They were a permanent hole in the bodywork for a long time, which
+  meant the one rule you have to read off a vehicle, can I get out, had no
+  picture at all. On foot the doors are the only way through the walls. They are open exactly while it is standing at a stop. That
   one fact turns getting off at the right place into something you plan a few
   seconds ahead — be near a door, or spend the dwell walking to one and watch
   your stop go past.

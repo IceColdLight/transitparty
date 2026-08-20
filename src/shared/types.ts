@@ -126,14 +126,16 @@ export type Vehicle = {
   dir: 1 | -1;
   /** the height of its floor plane: a tunnel, a viaduct, or the road */
   level: number;
-  /** stop id it is standing at with the doors open, or -1 if it is moving */
+  /** stop id it is standing at, or -1 if it is moving */
   atStop: number;
   /** stop id it is heading for */
   nextStop: number;
   /** seconds until it reaches nextStop */
   eta: number;
-  /** seconds of door time left, 0 when moving */
+  /** seconds left in which a body can still get through the doors, 0 when moving */
   doorTime: number;
+  /** how far the doors are open, 0 shut to 1 wide — always 0 while it moves */
+  door: number;
 };
 
 export type PlayerState = {

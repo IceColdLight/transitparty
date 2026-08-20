@@ -91,7 +91,7 @@ export type Scene3D = {
   /** keep the sky centred on whoever is looking; call it every frame */
   setViewer(x: number, y: number, z: number): void;
   /** call each frame with the current fleet */
-  updateVehicles(city: City, vehicles: Vehicle[], dt: number): void;
+  updateVehicles(city: City, vehicles: Vehicle[]): void;
   updatePlayers(players: PlayerState[], selfId: string): void;
   dispose(): void;
 };
@@ -960,9 +960,18 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
    * which meant the one rule you have to read off a vehicle — can I get out —
    * had no picture. They slide now: shut while it runs, open at a stop.
    */
-  const doorLeaves = new Map<string, { leaves: THREE.Mesh[]; open: number }>();
+  const doorLeaves = new Map<string, THREE.Object3D[]>();
   const lineMats = city.lines.map((l) => keep(new THREE.MeshLambertMaterial({ color: l.color })));
-  const glassMat = keep(new THREE.MeshLambertMaterial({ color: 0x16202b }));
+  /**
+   * Real glass: you can see through it, and through the vehicle. It was a flat
+   * dark panel, which at a stop made every window read as a closed shutter and
+   * hid the one thing a window is for — whether there is a way out behind it.
+   * `depthWrite` off so panes on the far side of a carriage still draw.
+   */
+  const glassMat = keep(new THREE.MeshLambertMaterial({
+    color: 0xbcd8e8, transparent: true, opacity: 0.3,
+    side: THREE.DoubleSide, depthWrite: false,
+  }));
   /**
    * One merged geometry per mode, built once and shared by every vehicle on
    * every line of it.
@@ -990,7 +999,6 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
 
     const closed = mode === 'metro' || mode === 'train';
     const T = 0.16;                       // panel thickness
-    const doorH = closed ? 2.1 : b.wall;  // a doorway you walk through
 
     /**
      * The floor, and the room under it for the running gear.
@@ -1033,12 +1041,6 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
         const gh = closed ? 1.15 : 0.4;
         if (pn.len > 1.4) {
           box(glass, pn.len - 0.55, gh, T * 0.9, pn.c, gy, z + side * T * 0.25);
-        }
-      }
-      // lintels over the doors, so a doorway is a door and not a slot to the roof
-      if (closed) {
-        for (const d of b.doors) {
-          box(body, b.doorWidth, b.wall - doorH, T, d * b.l, b.deck + doorH + (b.wall - doorH) / 2, z);
         }
       }
       // ends
@@ -1115,13 +1117,16 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
       // a nose, so the front of a train looks like the front of a train
       box(body, b.l * 0.06, b.wall * 0.72, b.w * 0.86, b.l * 0.5, b.deck + b.wall * 0.36, 0);
     }
-    if (!closed) {
-      // A windscreen at each end, which is where the glass belongs on
-      // something with open sides.
-      for (const end of [-1, 1]) {
-        box(glass, 0.12, b.h - b.wall - 0.5, b.w * 0.84,
-          end * (b.l / 2 - 0.25), b.deck + b.wall + (b.h - b.wall) / 2 - 0.1, 0);
-      }
+    /**
+     * A windscreen at each end. On an open-sided road vehicle it sits in the
+     * band between the waist rail and the roof, which is the only glass it
+     * carries; on a metro or a train it is the full height of the end wall,
+     * and it is what lets you see down a platform from inside a carriage.
+     */
+    for (const end of [-1, 1]) {
+      const y0 = closed ? b.deck + 0.75 : b.deck + b.wall + 0.1;
+      const y1 = b.deck + (closed ? b.wall - 0.25 : b.h - 0.4);
+      box(glass, 0.12, y1 - y0, b.w * 0.84, end * (b.l / 2 - 0.25), (y0 + y1) / 2, 0);
     }
     if (mode === 'tram') {
       // an articulation waist, narrower than the rest of it
@@ -1135,6 +1140,46 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
     };
     return { body: merge(body), dark: merge(dark), glass: merge(glass) };
   };
+
+  /**
+   * One half of one door: a kick panel, two stiles, a top rail and a pane.
+   *
+   * Full height on everything now, including the open-sided road vehicles —
+   * a waist-high leaf on a tram read as a gate on a cattle truck, and the door
+   * is the part of a vehicle a player looks straight at while deciding whether
+   * they are going to make it.
+   */
+  const leafParts = (mode: ModeId) => {
+    const b = BODIES[mode];
+    const closed = mode === 'metro' || mode === 'train';
+    // `h` on a road vehicle is measured above the deck, same as the roof it
+    // has to reach; on a closed one the wall IS the inside height.
+    const h = closed ? b.wall : b.h - 0.14;
+    const w = b.doorWidth * 0.52;
+    const frame: THREE.BufferGeometry[] = [];
+    const pane: THREE.BufferGeometry[] = [];
+    const box = (
+      into: THREE.BufferGeometry[], bw: number, bh: number, bd: number,
+      x: number, y: number, z: number,
+    ) => {
+      const g = new THREE.BoxGeometry(bw, bh, bd);
+      g.translate(x, y, z);
+      into.push(g);
+    };
+    const kick = Math.min(0.95, h * 0.38);
+    const glazed = h - kick - 0.12;
+    box(frame, w, kick, 0.1, 0, -h / 2 + kick / 2, 0);
+    box(frame, w, 0.12, 0.1, 0, h / 2 - 0.06, 0);
+    for (const e of [-1, 1]) box(frame, 0.09, glazed, 0.1, e * (w / 2 - 0.045), -h / 2 + kick + glazed / 2, 0);
+    box(pane, w - 0.18, glazed - 0.04, 0.05, 0, -h / 2 + kick + glazed / 2, 0);
+    const merge = (list: THREE.BufferGeometry[]) => {
+      const m = mergeGeometries(list, false)!;
+      list.forEach((g) => g.dispose());
+      return keep(m);
+    };
+    return { frame: merge(frame), pane: merge(pane), h };
+  };
+  const leaves: Partial<Record<ModeId, ReturnType<typeof leafParts>>> = {};
 
   const shells: Partial<Record<ModeId, ReturnType<typeof parts>>> = {};
   const darkMat = keep(new THREE.MeshLambertMaterial({ color: 0x24282f }));
@@ -1160,23 +1205,27 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
       board.rotation.y = Math.PI / 2;
       g.add(board);
 
-      const leafH = line.mode === 'metro' || line.mode === 'train' ? 2.1 : b.wall;
-      const leafGeo = keep(new THREE.BoxGeometry(b.doorWidth * 0.52, leafH, 0.14));
-      const leaves: THREE.Mesh[] = [];
+      if (!leaves[line.mode]) leaves[line.mode] = leafParts(line.mode);
+      const lf = leaves[line.mode]!;
+      const doors: THREE.Object3D[] = [];
       for (const d of b.doors) {
         for (const side of [-1, 1]) {
           // Bi-parting: two leaves that slide apart into the panels either side.
           for (const half of [-1, 1]) {
-            const leaf = new THREE.Mesh(leafGeo, lineMats[line.id]);
+            const leaf = new THREE.Group();
+            leaf.add(new THREE.Mesh(lf.frame, lineMats[line.id]));
+            leaf.add(new THREE.Mesh(lf.pane, glassMat));
+            // Outboard of the bodywork, so a leaf sliding open passes in front
+            // of the panel it hides behind instead of fighting it for pixels.
             leaf.position.set(
               d * b.l + half * b.doorWidth * 0.26,
-              b.deck + leafH / 2,
-              side * (b.w / 2 - 0.08),
+              b.deck + lf.h / 2,
+              side * (b.w / 2 + 0.02),
             );
             leaf.userData.shut = leaf.position.x;
             leaf.userData.slide = half * b.doorWidth * 0.5;
             g.add(leaf);
-            leaves.push(leaf);
+            doors.push(leaf);
           }
         }
       }
@@ -1184,7 +1233,7 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
       scene.add(g);
       const id = `${line.id}.${run}`;
       vehicleMeshes.set(id, g);
-      doorLeaves.set(id, { leaves, open: 0 });
+      doorLeaves.set(id, doors);
     }
   }
 
@@ -1199,17 +1248,15 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
       if (skyMesh) skyMesh.position.set(x, y, z);
     },
 
-    updateVehicles(_city, vehicles, dt) {
+    updateVehicles(_city, vehicles) {
       for (const v of vehicles) {
+        // The doors are a function of the clock, same as the position — no
+        // easing here, or the picture would disagree with the rule about
+        // whether you can get out, which is the one thing it must not do.
         const doors = doorLeaves.get(v.id);
         if (doors) {
-          // A door takes about a third of a second either way, which is short
-          // enough to sprint for and long enough to see happen.
-          const want = v.atStop >= 0 ? 1 : 0;
-          const k = Math.min(1, dt * 3.2);
-          doors.open += (want - doors.open) * k;
-          for (const leaf of doors.leaves) {
-            leaf.position.x = leaf.userData.shut + leaf.userData.slide * doors.open;
+          for (const leaf of doors) {
+            leaf.position.x = leaf.userData.shut + leaf.userData.slide * v.door;
           }
         }
         const mesh = vehicleMeshes.get(v.id);

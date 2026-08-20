@@ -87,7 +87,9 @@ export const newBody = (x: number, y: number): Body => ({
  * Everything about being inside a vehicle, in one place.
  *
  * A vehicle is a room. Walls hold you in, doorways are the only way through
- * them on foot, and the doors are open exactly while it is standing at a stop.
+ * them on foot, and the doors are only open while it is standing at a stop —
+ * and only as wide as they have actually slid, so one closing on you shuts you
+ * in a moment before it looks shut.
  * On a bus or a tram the walls are waist high, so a jump clears them and you
  * can bail out anywhere; on a metro or a train they go to the roof and you
  * are going to the next station whether you like it or not.
@@ -102,6 +104,8 @@ function cabin(city: City, v: Vehicle) {
     /** waist-high sides can be jumped; full-height ones cannot */
     vaultable: b.wall < 1.4,
     open: doorsOpen(v),
+    /** how far the doors have slid, which is how wide the way out is */
+    door: v.door,
   };
 }
 
@@ -111,7 +115,7 @@ function throughSide(
 ): boolean {
   const c = cabin(city, v);
   if (c.vaultable && aboveDeck >= c.b.wall - 0.02) return true;
-  return c.open && inDoorway(c.mode, lx);
+  return c.open && inDoorway(c.mode, lx, c.door);
 }
 
 export function stepBody(p: Body, input: MoveInput, dt: number, g: Ground): void {
@@ -289,7 +293,7 @@ export function stepBody(p: Body, input: MoveInput, dt: number, g: Ground): void
         if (insideBody(v, from.x, from.y)) continue;   // already in it; let them out
         const c = cabin(t.city, v);
         if (c.vaultable && p.h - c.b.deck >= c.b.wall - 0.02) continue;   // over the side
-        if (c.open && inDoorway(c.mode, toLocal(v, x, y).lx)) continue;   // through the door
+        if (c.open && inDoorway(c.mode, toLocal(v, x, y).lx, c.door)) continue;   // through the door
         return true;
       }
       return false;
@@ -356,7 +360,7 @@ export function stepBody(p: Body, input: MoveInput, dt: number, g: Ground): void
     const L = toLocal(deck.vehicle, p.x, p.y);
     const inside = Math.abs(L.ly) <= c.halfW && Math.abs(L.lx) <= c.halfL;
     const overTheTop = c.vaultable && Math.max(wasAt, p.h) - c.b.deck >= c.b.wall - 0.02;
-    const throughDoor = c.open && inDoorway(c.mode, L.lx);
+    const throughDoor = c.open && inDoorway(c.mode, L.lx, c.door);
     if (!inside && !overTheTop && !throughDoor) deck = null;
   }
 

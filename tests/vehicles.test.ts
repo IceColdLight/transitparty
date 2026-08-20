@@ -7,11 +7,12 @@
  * the map is unreachable for two minutes at a stretch, a door that is never
  * open long enough to board, a run that skips a stop entirely.
  */
-import { MODES, TEMPO } from '../src/shared/constants.js';
+import { BODIES, DOORS, MODES, PLAYER, TEMPO } from '../src/shared/constants.js';
 import { onStreet } from '../src/shared/streets.js';
 import { buildCity } from '../src/shared/city.js';
 import {
-  allVehicles, departures, overVehicle, remainingStops, vehicleById,
+  allVehicles, boardingWindow, departures, inDoorway, overVehicle, remainingStops,
+  vehicleById,
 } from '../src/shared/vehicles.js';
 import { avg, check, describe, near, note, report } from './harness.js';
 
@@ -61,6 +62,58 @@ check('and never teleports between two samples', jumps === 0, `${jumps} jumps`);
 // Out and back means both termini get a double dwell — the turnaround.
 const expectedDoors = line.stops.length * line.dwell * 2;
 near('door time per cycle is one dwell per stop, each way', doorSeconds, expectedDoors, 1);
+
+/**
+ * The rule the whole thing was rebuilt for: a vehicle does not move with its
+ * doors open. Neither half of it is enforced anywhere — both fall out of the
+ * expression that computes the openness — so this is the check that the
+ * expression still says what it is supposed to.
+ */
+describe('doors and wheels');
+{
+  const dl = city.lines[0];
+  const step = 1 / 30;
+  let moved = 0, ajar = 0, movingAjar = 0, ajarMoving = 0, widest = 0, shutBefore = Infinity;
+  let shutRun = 0;
+  for (let t = 0; t < dl.cycle; t += step) {
+    const a = vehicleById(city, `${dl.id}.0`, t)!;
+    const b = vehicleById(city, `${dl.id}.0`, t + step)!;
+    const speed = Math.hypot(b.x - a.x, b.y - a.y) / step;
+    if (speed > 0.05) moved++;
+    if (a.door > 1e-9) ajar++;
+    if (speed > 0.05 && a.door > 1e-9) movingAjar++;
+    if (a.door > 1e-9 && speed > 0.05) ajarMoving++;
+    widest = Math.max(widest, a.door);
+    // How long it stands with the doors shut before the wheels turn.
+    if (a.door <= 1e-9 && speed <= 0.05) shutRun += step;
+    else if (speed > 0.05) { if (shutRun > 0) shutBefore = Math.min(shutBefore, shutRun); shutRun = 0; }
+    else shutRun = 0;
+  }
+  note(`${dl.name}: ${(ajar * step).toFixed(0)}s of the ${dl.cycle.toFixed(0)}s cycle with doors ajar,`
+    + ` ${(moved * step).toFixed(0)}s moving`);
+  check('it never moves with the doors anything but shut', movingAjar === 0, `${movingAjar} samples`);
+  check('and the doors never open unless it is standing still', ajarMoving === 0, `${ajarMoving} samples`);
+  check('they do open all the way', widest > 0.999, `widest ${widest.toFixed(3)}`);
+  check('and it stands shut for a moment before pulling away',
+    shutBefore >= DOORS.settle - 2 * step,
+    `${shutBefore.toFixed(2)}s measured at ${(step * 1000).toFixed(0)}ms, settle is ${DOORS.settle}s`);
+
+  // A door you cannot fit through is not a door, and the moment it stops being
+  // one comes before it looks shut — that gap is what makes a closing door
+  // something you can lose a race to.
+  const mode = city.lines[dl.id].mode;
+  const doorX = BODIES[mode].doors[0] * BODIES[mode].l;
+  const half = (PLAYER.radius * 2) / BODIES[mode].doorWidth;
+  check('a doorway is only a way out while a body fits through it',
+    !inDoorway(mode, doorX, half * 0.9) && inDoorway(mode, doorX, half * 1.1),
+    `${mode} needs ${(half * 100).toFixed(0)}% open for a ${(PLAYER.radius * 2).toFixed(2)}m body`);
+  for (const m of ['bus', 'tram', 'metro', 'train'] as const) {
+    const w = boardingWindow(m, MODES[m].dwell);
+    note(`${m}: ${MODES[m].dwell}s stop, ${w.toFixed(2)}s of it a doorway`);
+    check(`a ${m} stop is mostly doorway, not door`, w > MODES[m].dwell * 0.8,
+      `${((w / MODES[m].dwell) * 100).toFixed(0)}%`);
+  }
+}
 
 describe('boarding windows');
 

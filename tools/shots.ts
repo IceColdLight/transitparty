@@ -18,7 +18,7 @@ import { createCanvas } from '@napi-rs/canvas';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { PLAYER, PLATFORM } from '../src/shared/constants.js';
 import { buildCity } from '../src/shared/city.js';
-import { platformAt } from '../src/shared/streets.js';
+import { onStreet, platformAt } from '../src/shared/streets.js';
 import { allVehicles } from '../src/shared/vehicles.js';
 import { SIGN_H, SIGN_W, buildScene, paintSign } from '../src/client/scene.js';
 import { drawMap } from '../src/client/map.js';
@@ -107,7 +107,7 @@ const people: PlayerState[] = [
   { id: 'p2', name: 'Ada', color: '#5cc8ff', x: pad.x + 4, y: pad.y + 6, h: 0, facing: 1,
     grounded: true, riding: null, stamina: 0.6, sprinting: true, flying: false, finished: null, place: 0 },
 ];
-built.updateVehicles(city, vehicles, 1);
+built.updateVehicles(city, vehicles);
 built.updatePlayers(people, 'p1');
 
 function shoot(name: string, x: number, y: number, h: number, look: number, pitch = 0) {
@@ -183,13 +183,35 @@ if (rider) shoot('fp-riding', rider.x, rider.y, 0.5, rider.angle);
   shoot('corner', sx, sy - 26, 0, Math.PI / 2, 0.06);
 }
 
-// One portrait of each mode, from the side, ten metres off.
+/**
+ * One portrait of each mode, from the side, with its doors wide — which means
+ * hunting forward through the timetable for a moment one of them is standing,
+ * and looking from ITS level, or the metro portrait is a picture of the road
+ * eight metres above the metro.
+ */
 for (const mode of ['bus', 'tram', 'metro', 'train'] as const) {
-  const v = vehicles.find((x) => city.lines[x.line].mode === mode && x.atStop >= 0)
-    ?? vehicles.find((x) => city.lines[x.line].mode === mode);
+  // The camera also has to stand somewhere — a road vehicle standing with a
+  // building seventeen metres off its flank makes a portrait of a wall.
+  const usable = (x: typeof vehicles[number]) => {
+    if (city.lines[x.line].mode !== mode || x.door < 0.99) return false;
+    const a = x.angle + Math.PI / 2;
+    return x.level !== 0
+      || onStreet(city.streets, { x: x.x - Math.cos(a) * 17, y: x.y - Math.sin(a) * 17 });
+  };
+  let vt = time;
+  let v = vehicles.find(usable);
+  for (let t = 1; !v && t < 400; t++) {
+    vt = time + t;
+    v = allVehicles(city, vt).find(usable);
+  }
+  if (!v) { vt = time; v = vehicles.find((x) => city.lines[x.line].mode === mode); }
   if (!v) continue;
+  // The whole fleet has to be moved to the moment this one has its doors open,
+  // or the portrait is of an empty patch of road where it used to be.
+  built.updateVehicles(city, allVehicles(city, vt));
   const side = v.angle + Math.PI / 2;
-  shoot(`model-${mode}`, v.x - Math.cos(side) * 17, v.y - Math.sin(side) * 17, 3.4, side, -0.12);
+  shoot(`model-${mode}`, v.x - Math.cos(side) * 17, v.y - Math.sin(side) * 17,
+    v.level + 3.4, side, -0.12);
 }
 
 // And the map, on its card, exactly as it is pasted onto the held quad.

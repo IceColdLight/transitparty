@@ -390,11 +390,31 @@ export const STATION = {
  * `spacing` drives stop placement, which is what really separates them: it is
  * the reason a bus is never far away and a train always is.
  */
+/**
+ * How long a door takes, and how long it stays shut before the wheels turn.
+ *
+ * ABSOLUTE seconds, like `dwell`, and short: the world runs at TEMPO, so a
+ * real bus door's second and a half is half of one here. `settle` is the gap
+ * between the doors finishing and the vehicle leaving — it is what makes
+ * "shut, THEN go" something you can watch rather than something you are told.
+ *
+ * Both come out of the dwell, so they are also a tax on your window to board.
+ * See `boardingWindow`, which is the number the sprint is actually sized
+ * against; the four seconds a bus stands for is not four seconds of doorway.
+ */
+export const DOORS = {
+  /** seconds from shut to fully open, and back */
+  travel: 0.35,
+  /** seconds standing with the doors shut before departure */
+  settle: 0.15,
+} as const;
+
 type ModeSpec = {
   /** cruise speed, m/s */
   speed: number;
   /**
-   * Seconds standing at each stop with the doors open — your window to run.
+   * Seconds standing at each stop — your window to run, less what the doors
+   * themselves take at each end of it.
    * ABSOLUTE seconds, deliberately not divided by TEMPO: see the note there.
    */
   dwell: number;

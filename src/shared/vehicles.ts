@@ -18,7 +18,7 @@
  * therefore get a double dwell, which is the turnaround, and which is why a
  * terminus is the one place you can reliably catch something you just missed.
  */
-import { BODIES, LEVELS, TEMPO, type ModeId } from './constants.js';
+import { BODIES, DOORS, LEVELS, PLAYER, TEMPO, type ModeId } from './constants.js';
 import type { City, Line, Vehicle } from './types.js';
 
 /** Seconds into this vehicle's cycle. */
@@ -28,6 +28,25 @@ function phaseOf(line: Line, run: number, time: number): number {
   if (p < 0) p += line.cycle;
   return p;
 }
+
+/**
+ * The fraction of open at which a doorway is wide enough for somebody to fit
+ * through it. Half a door either side, and a body is two radii across.
+ */
+const passableAt = (mode: ModeId) =>
+  Math.min(1, (PLAYER.radius * 2) / BODIES[mode].doorWidth);
+
+/** Seconds of doorway left, given seconds of standing left. */
+const doorLeft = (mode: ModeId, stand: number) =>
+  Math.max(0, stand - DOORS.settle - DOORS.travel * passableAt(mode));
+
+/**
+ * Seconds of a stop you can actually get through the doors in — the number a
+ * sprint is sized against, and not the same as the dwell, because the doors
+ * take a bite out of both ends of it.
+ */
+export const boardingWindow = (mode: ModeId, dwell: number) =>
+  Math.max(0, dwell - DOORS.settle - 2 * DOORS.travel * passableAt(mode));
 
 function locate(city: City, line: Line, run: number, time: number): Vehicle {
   const n = line.stops.length;
@@ -80,25 +99,45 @@ function locate(city: City, line: Line, run: number, time: number): Vehicle {
   const level = LEVELS[city.lines[line.id].mode];
   const mk = (
     x: number, y: number, angle: number, atStop: number, nextStop: number,
-    eta: number, doorTime: number,
+    eta: number, doorTime: number, door: number,
   ): Vehicle => ({
     id: `${line.id}.${run}`, line: line.id, run, x, y, angle, dir, level,
-    atStop, nextStop, eta, doorTime,
+    atStop, nextStop, eta, doorTime, door,
   });
+  const mode = city.lines[line.id].mode;
 
   for (let i = 0; i < n; i++) {
     if (q < line.dwell) {
-      // Standing with the doors open. At a terminus the next dwell is the
-      // other direction's, so the window is twice as long — say so, because
-      // "how long have I got to run" is the only question being asked here.
-      const doorTime = line.dwell - q + (i === n - 1 ? line.dwell : 0);
+      /**
+       * Standing at the stop. At a terminus the next dwell is the other
+       * direction's, so the WAIT is twice as long — but it is two stops, not
+       * one long one, because the lane it stands in flips with the direction
+       * and it changes sides between them. The doors shut for that, which is
+       * both the honest picture of a turnaround and the only way the rule
+       * below holds at a terminus.
+       */
+      const stand = line.dwell - q + (i === n - 1 ? line.dwell : 0);
+      const left = line.dwell - q;
       const nextIdx = i < n - 1 ? i + 1 : n - 2;
       const base = at(i), nx = at(nextIdx);
       const b = berths[i];
       const p = { x: base.x + b.x, y: base.y + b.y };
       const legTime = i < n - 1 ? legs[i] : legs[n - 2];
+      /**
+       * The doors, as a function of the clock like everything else here.
+       *
+       * They open on arrival, hold, and are back shut a `settle` before the
+       * wheels turn — so "it only moves once they are shut" and "they only
+       * open while it is standing" are not rules anybody enforces, they are
+       * things this expression cannot say otherwise.
+       */
+      const door = Math.min(
+        1,
+        q / DOORS.travel,
+        Math.max(0, left - DOORS.settle) / DOORS.travel,
+      );
       return mk(p.x, p.y, Math.atan2(nx.y - base.y, nx.x - base.x), order[i], order[nextIdx],
-        doorTime + legTime, doorTime);
+        stand + legTime, doorLeft(mode, left), door);
     }
     q -= line.dwell;
     if (i < n - 1) {
@@ -109,7 +148,7 @@ function locate(city: City, line: Line, run: number, time: number): Vehicle {
         return mk(
           p.x + (nx.x - p.x) * u + b0.x + b1.x,
           p.y + (nx.y - p.y) * u + b0.y + b1.y,
-          Math.atan2(nx.y - p.y, nx.x - p.x), -1, order[i + 1], legs[i] - q, 0,
+          Math.atan2(nx.y - p.y, nx.x - p.x), -1, order[i + 1], legs[i] - q, 0, 0,
         );
       }
       q -= legs[i];
@@ -119,7 +158,7 @@ function locate(city: City, line: Line, run: number, time: number): Vehicle {
   const base = at(n - 1), pv = at(n - 2);
   const bl = berths[n - 1];
   return mk(base.x + bl.x, base.y + bl.y,
-    Math.atan2(base.y - pv.y, base.x - pv.x), order[n - 1], order[n - 2], 0, 0);
+    Math.atan2(base.y - pv.y, base.x - pv.x), order[n - 1], order[n - 2], 0, 0, 0);
 }
 
 export function vehiclesOnLine(city: City, lineId: number, time: number): Vehicle[] {
@@ -177,7 +216,10 @@ export function departures(city: City, stopId: number, time: number, horizon = 6
       for (let t = 0; t < horizon; t += 1) {
         const v = locate(city, line, run, time + t);
         if (v.atStop === stopId) {
-          out.push({ line: lineId, vehicle: v.id, in: t, towards: v.nextStop, boardable: t < 0.5 });
+          out.push({
+            line: lineId, vehicle: v.id, in: t, towards: v.nextStop,
+            boardable: t < 0.5 && v.doorTime > 0,
+          });
           break;
         }
       }
@@ -209,17 +251,25 @@ export function overVehicle(city: City, v: Vehicle, x: number, y: number, slack 
   return Math.abs(lx) <= b.l / 2 + slack && Math.abs(ly) <= b.w / 2 + slack;
 }
 
-/** Is this position along the vehicle opposite a doorway? */
-export function inDoorway(mode: ModeId, lx: number): boolean {
+/**
+ * Is this position along the vehicle opposite a doorway that is open far
+ * enough to fit through? The aperture is the door's width times how far it has
+ * slid, and you fit while half of that clears your radius — so a closing door
+ * stops being a way out some way before it is shut, which is the whole point
+ * of being able to see it move.
+ */
+export function inDoorway(mode: ModeId, lx: number, open = 1): boolean {
   const b = BODIES[mode];
+  const half = (b.doorWidth * open) / 2;
+  if (half < PLAYER.radius) return false;
   for (const d of b.doors) {
-    if (Math.abs(lx - d * b.l) <= b.doorWidth / 2) return true;
+    if (Math.abs(lx - d * b.l) <= half) return true;
   }
   return false;
 }
 
-/** The doors are open exactly while it is standing at a stop. */
-export const doorsOpen = (v: Vehicle) => v.atStop >= 0;
+/** Anything but shut. Whether you FIT is `inDoorway`, which knows how wide. */
+export const doorsOpen = (v: Vehicle) => v.door > 0;
 
 /**
  * The floor under a pair of feet: the highest vehicle deck they are standing
