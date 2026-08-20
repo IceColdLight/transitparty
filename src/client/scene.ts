@@ -103,14 +103,50 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
     junk.push(x); return x;
   };
 
-  // ── the ground. Everything walkable is this; blocks sit on top of it ─────
+  /**
+   * The ground, with a hole cut through it at every stairwell that goes DOWN.
+   *
+   * It used to be one unbroken plane, which meant the road was paved over the
+   * top of every subway entrance: the stairs were there, you could walk down
+   * them, and there was nothing whatever to see from the street. A staircase
+   * you cannot find is a station you cannot use.
+   *
+   * Only descending shafts get a hole. A flight rising to a viaduct stands ON
+   * the pavement and the pavement stays where it is.
+   */
   const groundMat = keep(new THREE.MeshLambertMaterial({ color: 0x4a5058 }));
-  const ground = new THREE.Mesh(
-    keep(new THREE.PlaneGeometry(CITY.width * 1.6, CITY.height * 1.6)), groundMat,
-  );
-  ground.rotation.x = -Math.PI / 2;
-  ground.position.set(CITY.width / 2, 0, CITY.height / 2);
-  scene.add(ground);
+  {
+    const pad = 0.6;
+    const shape = new THREE.Shape();
+    const x0 = -CITY.width * 0.3, x1 = CITY.width * 1.3;
+    const z0 = -CITY.height * 0.3, z1 = CITY.height * 1.3;
+    // Built in (x, -z) so a single rotateX(-90) lays it flat facing up.
+    shape.moveTo(x0, -z0);
+    shape.lineTo(x1, -z0);
+    shape.lineTo(x1, -z1);
+    shape.lineTo(x0, -z1);
+    shape.closePath();
+
+    for (const st of city.stations) {
+      if (st.level >= 0) continue;
+      const c = Math.cos(st.shaft.angle), sn = Math.sin(st.shaft.angle);
+      const hl = st.shaft.hl + pad, hw = st.shaft.hw + pad;
+      const corner = (a: number, b: number) => ({
+        x: st.shaft.x + c * a - sn * b,
+        z: st.shaft.y + sn * a + c * b,
+      });
+      const pts = [corner(-hl, -hw), corner(hl, -hw), corner(hl, hw), corner(-hl, hw)];
+      const hole = new THREE.Path();
+      hole.moveTo(pts[0].x, -pts[0].z);
+      for (let i = 1; i < pts.length; i++) hole.lineTo(pts[i].x, -pts[i].z);
+      hole.closePath();
+      shape.holes.push(hole);
+    }
+
+    const geo = keep(new THREE.ShapeGeometry(shape));
+    geo.rotateX(-Math.PI / 2);
+    scene.add(new THREE.Mesh(geo, groundMat));
+  }
 
   // ── blocks, as instanced boxes. One block is not one building: it is split
   //    into footprints on a small grid, which is what makes a street read as a
@@ -324,9 +360,16 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
     // nobody.
     sign.rotation.y = onVertical ? 0 : Math.PI / 2;
     scene.add(sign);
+    /**
+     * A hair behind the first, along its own normal. Two planes back to back
+     * at exactly the same position are coplanar, and coplanar surfaces
+     * z-fight: the depth test picks whichever won this pixel, so the name and
+     * the line colours shimmer and tear as you move.
+     */
     const twin = sign.clone();
     twin.rotation.y += Math.PI;
-    twin.position.set(back.x, 3.3, back.y);
+    const n = { x: Math.sin(-sign.rotation.y), y: Math.cos(-sign.rotation.y) };
+    twin.position.set(back.x - n.x * 0.03, 3.3, back.y - n.y * 0.03);
     scene.add(twin);
    }
   }
@@ -552,10 +595,12 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
     entry.position.set(mouth.x, 2.6, mouth.y);
     entry.rotation.y = -st.shaft.angle + Math.PI / 2;
     scene.add(entry);
-    // Back to back, or half the city reads "ferhabtpuaH".
+    // Back to back, and offset, or half the city reads "ferhabtpuaH" and the
+    // other half watches the two faces z-fight over every pixel.
     const entryTwin = entry.clone();
     entryTwin.rotation.y += Math.PI;
-    entryTwin.position.set(mouth.x, 2.6, mouth.y);
+    const en = { x: Math.sin(-entry.rotation.y), y: Math.cos(-entry.rotation.y) };
+    entryTwin.position.set(mouth.x - en.x * 0.03, 2.6, mouth.y - en.y * 0.03);
     scene.add(entryTwin);
   }
 

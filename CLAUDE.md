@@ -242,6 +242,20 @@ Two more came out of playing it:
   the track bed a deck's depth below it. You can drop down onto the track; the
   bodywork stops you being there when a train is.
 
+And two that were only visible once you went looking for them:
+
+- **A subway entrance was invisible.** The ground was one unbroken plane, so
+  the road was paved straight over every descending stairwell: the stairs were
+  there and you could walk down them and there was nothing at all to see from
+  the street. The ground is a shape with a hole cut in it at each descending
+  shaft now. Ascending flights get no hole — a staircase up to a viaduct
+  stands ON the pavement and the pavement stays put.
+- **Every station sign shimmered.** Signs are drawn back to back so they read
+  from either side, and the twin was placed at exactly the same position —
+  coplanar, so the depth test picked a different face per pixel per frame and
+  the name and the line colours tore. Three centimetres along the normal fixes
+  it.
+
 A stairwell also needed WALLS. Without them you can walk off the side halfway
 down and reappear on the road above, and anyone on the pavement can wander
 into the hole sideways. You go in at the top and out at the bottom.
