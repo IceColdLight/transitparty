@@ -148,6 +148,26 @@ shoot('fp-up', pad.x, pad.y, PLATFORM.height, along, 0.5);
 const rider = vehicles.find((v) => v.atStop < 0 && ['bus', 'tram'].includes(city.lines[v.line].mode));
 if (rider) shoot('fp-riding', rider.x, rider.y, 0.5, rider.angle);
 
+// The new levels: a stair mouth from the street, and down on a platform.
+{
+  const st = city.stations.find((x) => x.mode === 'metro');
+  if (st) {
+    const mouth = {
+      x: st.shaft.x - Math.cos(st.shaft.angle) * st.shaft.hl,
+      y: st.shaft.y - Math.sin(st.shaft.angle) * st.shaft.hl,
+    };
+    shoot('stairs-down', mouth.x - Math.cos(st.shaft.angle) * 9,
+      mouth.y - Math.sin(st.shaft.angle) * 9, 0, st.shaft.angle, -0.25);
+    shoot('platform-under', st.hall.x - Math.cos(st.hall.angle) * (st.hall.hl - 6),
+      st.hall.y - Math.sin(st.hall.angle) * (st.hall.hl - 6), st.level, st.hall.angle);
+  }
+  const tr = city.stations.find((x) => x.mode === 'train');
+  if (tr) {
+    shoot('viaduct', tr.hall.x - Math.cos(tr.hall.angle) * 60,
+      tr.hall.y - Math.sin(tr.hall.angle) * 60, 0, tr.hall.angle, 0.25);
+  }
+}
+
 // One portrait of each mode, from the side, ten metres off.
 for (const mode of ['bus', 'tram', 'metro', 'train'] as const) {
   const v = vehicles.find((x) => city.lines[x.line].mode === mode && x.atStop >= 0)

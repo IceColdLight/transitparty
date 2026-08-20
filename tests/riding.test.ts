@@ -12,7 +12,7 @@
  * at the moment your feet leave or land is what makes stepping off a tram
  * throw you down the street instead of dropping you where you stood.
  */
-import { BODIES, PLAYER, WALK } from '../src/shared/constants.js';
+import { BODIES, LEVELS, PLAYER, WALK } from '../src/shared/constants.js';
 import { buildCity } from '../src/shared/city.js';
 import { type Ground, newBody, stepBody } from '../src/shared/movement.js';
 import { allVehicles, overVehicle, toWorld, vehicleById } from '../src/shared/vehicles.js';
@@ -152,9 +152,13 @@ describe('and what you cannot do');
 const rail = findDwelling(city, 'metro');
 if (rail) {
   let t = rail.time;
+  // Down on the platform, because the metro is in a tunnel eight metres under
+  // the road and cannot be boarded from the pavement any more.
   const r = newBody(rail.v.x, rail.v.y);
+  r.h = LEVELS.metro;
   stepBody(r, still, STEP, groundAt(city, t));
-  check('you can stand on a metro at a station', r.riding === rail.v.id, `${r.riding}`);
+  check('you can stand on a metro at its underground platform',
+    r.riding === rail.v.id, `${r.riding} at h=${r.h.toFixed(1)}`);
 
   // Wait for it to leave, then try very hard to get out.
   let inTunnel = false;
@@ -291,6 +295,7 @@ describe('doors');
     let t = rail.time;
     const at = toWorld(rail.v, spec.doors[0] * spec.l, 0);
     const p2 = newBody(at.x, at.y);
+    p2.h = LEVELS.metro;
     stepBody(p2, still, STEP, groundAt(city, t));
     const boarded = p2.riding;
     let moving = false;

@@ -323,6 +323,58 @@ export const ARRIVE_RADIUS = 22;
 export type ModeId = 'train' | 'metro' | 'tram' | 'bus';
 
 /**
+ * How far apart the two running lines of a railway are, and how much further
+ * out a second line at the same station goes. Small: rail has its own
+ * alignment and does not share a street with anybody, so it needs only enough
+ * to keep opposing trains apart — and everything has to fit inside the station
+ * box with room for a platform beside it.
+ */
+export const RAIL = { gauge: 2.7, spread: 5.6 };
+
+/**
+ * What height each mode runs at. The metro is in a tunnel and the train is on
+ * a viaduct; buses and trams are on the road with everybody else.
+ *
+ * These are the numbers that turn the city into three levels to navigate
+ * rather than one. Deep enough that a staircase is a walk, shallow enough that
+ * the walk is seconds rather than a chore.
+ */
+export const LEVELS: Record<ModeId, number> = {
+  train: 9,
+  metro: -8,
+  tram: 0,
+  bus: 0,
+};
+
+/** Platform boxes, the stairs into them, and the passage between. */
+export const STATION = {
+  /** the hall is this much longer than the vehicle that calls at it */
+  overhang: 14,
+  /** clear space either side of the outermost track, for people to stand on */
+  platform: 3.6,
+  /**
+   * How far off the centre of the road the stairs are.
+   *
+   * On the FOOTWAY, beyond the outermost lane. The first version put the
+   * entrance on the centre line where the stop is, which is the middle of the
+   * carriageway — so a stairwell was a hole in the road with buses driving
+   * through it.
+   */
+  entry: 14.3,
+  /** length of the ramp, and so how far the entrance is along the street */
+  shaftLength: 19,
+  shaftWidth: 4.6,
+  /** the corridor from the foot of the stairs to the platform */
+  passageWidth: 5,
+  /**
+   * Seconds the route planner adds to boarding anything that is not at street
+   * level. Stairs are not free, and a planner that thinks they are quotes
+   * journeys that cannot be made in the time.
+   */
+  access: 14 / TEMPO,
+};
+
+/**
  * The four modes exist to be a TRADE, not a ladder. Every one of them is the
  * right answer somewhere:
  *

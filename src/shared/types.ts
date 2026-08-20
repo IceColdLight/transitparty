@@ -1,6 +1,7 @@
 import type { ModeId } from './constants.js';
 import type { River } from './river.js';
 import type { Block, Streets } from './streets.js';
+import type { Station } from './stations.js';
 
 /** A station. Positions are world metres; the city is drawn to real geography. */
 export type Stop = {
@@ -72,6 +73,11 @@ export type City = {
   /** Everything that is not a street. Solid. */
   blocks: Block[];
   /**
+   * Underground and elevated platforms, and the stairs into them. One per stop
+   * per rail mode; a stop with both gets one of each.
+   */
+  stations: Station[];
+  /**
    * The water and its bridges. Not scenery: you cannot walk across the river
    * except at a bridge, and only four lines cross it at all. It is the thing
    * that stops the network being a mesh.
@@ -118,6 +124,8 @@ export type Vehicle = {
   angle: number;
   /** +1 running along the stop list, -1 coming back */
   dir: 1 | -1;
+  /** the height of its floor plane: a tunnel, a viaduct, or the road */
+  level: number;
   /** stop id it is standing at with the doors open, or -1 if it is moving */
   atStop: number;
   /** stop id it is heading for */

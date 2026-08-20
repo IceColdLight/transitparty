@@ -142,6 +142,12 @@ and you go round them, so the distance to a stop is rarely the distance to a
 stop. Holding a diagonal walks you round a corner without touching the
 keyboard again.
 
+**The metro is underground and the train is overhead.** Neither is on the
+street: you have to find the staircase, and the sign at its mouth is what tells
+you which station it is. A metro platform is eight metres down a hole in the
+pavement; a train platform is nine metres up a flight of steps. Changing from
+the metro to a bus means coming back up, and that time is real.
+
 **The street shows you nothing about the network.** You get what you would
 actually get standing in a city: roads, buildings, water, and a station sign
 with the lines that call at it. Where those lines *go* is a question for the

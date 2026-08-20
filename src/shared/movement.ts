@@ -14,6 +14,7 @@
 import { BODIES, CITY, PLAYER, STAMINA, WALK } from './constants.js';
 import { type River, illegalCrossing } from './river.js';
 import { type Streets, onStreet, snapToStreet } from './streets.js';
+import { crossesShaftWall, footingAt, pickFloor } from './stations.js';
 import {
   deckUnder, doorsOpen, inDoorway, overVehicle, toLocal, toWorld, vehicleById, vehicleVelocity,
 } from './vehicles.js';
@@ -51,6 +52,25 @@ export type Ground = {
   /** null only in tests that care about the speed model and nothing else */
   transit: { city: City; vehicles: Vehicle[]; time: number } | null;
 };
+
+/**
+ * Every floor at a point: the road, and any station hall or staircase dug
+ * under or built over it.
+ *
+ * A stairwell SUPPRESSES the road above it — that is what makes a doorway a
+ * hole you can walk down rather than a patch of pavement.
+ */
+function floorsAt(g: Ground, x: number, y: number): number[] {
+  const foot = g.transit ? footingAt(g.transit.city, x, y) : { floors: [], inShaft: false };
+  const floors = foot.floors.slice();
+  if (!foot.inShaft && onStreet(g.streets, { x, y })) floors.push(0);
+  return floors;
+}
+
+/** Is there anywhere to stand at this point, at all? */
+function standable(g: Ground, x: number, y: number, feet: number): boolean {
+  return pickFloor(floorsAt(g, x, y), feet, PLAYER.step) !== null;
+}
 
 export const newBody = (x: number, y: number): Body => ({
   x, y, h: 0, vx: 0, vy: 0, vh: 0,
@@ -226,8 +246,16 @@ export function stepBody(p: Body, input: MoveInput, dt: number, g: Ground): void
      * inside one. Anything that is already inside — because a bus drove onto
      * it — has to be able to walk back out.
      */
+    /**
+     * Solid only if it is at YOUR level. `overVehicle` is a floor-plan test
+     * and knows nothing about tunnels, so without the height check a metro
+     * running eight metres beneath the road would stop a pedestrian dead in
+     * the street above it.
+     */
     const insideBody = (v: Vehicle, x: number, y: number) => {
       if (Math.abs(v.x - x) > 26 || Math.abs(v.y - y) > 26) return false;
+      const b = BODIES[t2City!.lines[v.line].mode];
+      if (p.h > v.level + b.h || p.h < v.level - PLAYER.step) return false;
       return overVehicle(t2City!, v, x, y);
     };
     const barred = (x: number, y: number) => {
@@ -243,12 +271,13 @@ export function stepBody(p: Body, input: MoveInput, dt: number, g: Ground): void
       return false;
     };
 
-    // On foot: streets only, never across open water, and not through a bus.
+    // On foot: somewhere to stand, never across open water, not through a bus.
     const clear = (x: number, y: number) =>
-      onStreet(g.streets, { x, y })
+      standable(g, x, y, p.h)
       && !illegalCrossing(g.river, from, { x, y }, CITY.bridgeRadius)
+      && !(t && crossesShaftWall(t.city, from.x, from.y, x, y))
       && !barred(x, y);
-    if (!onStreet(g.streets, from)) {
+    if (!standable(g, from.x, from.y, p.h)) {
       // Off the grid somehow. Walk back on rather than being stuck forever,
       // which is the one failure a player can neither diagnose nor escape.
       const back = snapToStreet(g.streets, from);
@@ -307,8 +336,17 @@ export function stepBody(p: Body, input: MoveInput, dt: number, g: Ground): void
     if (!inside && !overTheTop && !throughDoor) deck = null;
   }
 
-  const floor = deck ? deck.height : 0;
-  const landing = deck ? deck.vehicle.id : null;
+  /**
+   * The floor is whichever surface is nearest beneath your feet — the road,
+   * a platform eight metres down, a viaduct nine metres up, or the deck of
+   * something standing at one of them.
+   */
+  const ground = pickFloor(floorsAt(g, p.x, p.y), Math.max(wasAt, p.h), reach);
+  const deckHeight = deck ? deck.height : null;
+  const floor = deckHeight !== null && (ground === null || deckHeight > ground)
+    ? deckHeight
+    : (ground ?? 0);
+  const landing = deckHeight !== null && floor === deckHeight ? deck!.vehicle.id : null;
 
   if (p.h <= floor + 1e-6 && p.vh <= 0) {
     p.h = floor;

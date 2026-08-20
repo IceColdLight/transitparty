@@ -29,7 +29,9 @@
  * And only four lines cross the water. That is the chokepoint the first
  * cities lacked; see river.ts for the measurements that forced it.
  */
-import { CITY, FLEET, LANES, MODES, RACE, TEMPO, type ModeId } from './constants.js';
+import {
+  BODIES, CITY, FLEET, LANES, LEVELS, MODES, RACE, RAIL, STATION, TEMPO, type ModeId,
+} from './constants.js';
 import { type Rng, pick, range, rng } from './rng.js';
 import { type River, bankOf, illegalCrossing } from './river.js';
 import { type Net, bestRoute, pedestrian, walkNeighbours, walkTime } from './routing.js';
@@ -37,6 +39,7 @@ import {
   type Block, type Streets, bridgeSites, makeBlocks, makeStreets, nearestJunction,
   onStreet, snapToStreet, streetRoute,
 } from './streets.js';
+import type { Station } from './stations.js';
 import type { City, Line, Stop } from './types.js';
 
 type Pt = { x: number; y: number };
@@ -191,7 +194,8 @@ function placeOnPath(r: Rng, path: Pt[], spacing: number): Pt[] {
 
 /** Everything except the race: the network itself. */
 export function generateNet(seed: number): {
-  stops: Stop[]; lines: Line[]; streets: Streets; blocks: Block[]; river: River; hub: number;
+  stops: Stop[]; lines: Line[]; streets: Streets; blocks: Block[]; river: River;
+  stations: Station[]; hub: number;
 } {
   const r = rng(seed);
   const streets = makeStreets(r);
@@ -526,7 +530,10 @@ export function generateNet(seed: number): {
   fill('bus', FLEET.bus, 300, 0, 1100);
 
   assignLanes(stops, lines);
-  return { stops, lines, streets, blocks: makeBlocks(streets, r), river, hub };
+  return {
+    stops, lines, streets, blocks: makeBlocks(streets, r), river, hub,
+    stations: buildStations(streets, stops, lines),
+  };
 }
 
 /**
@@ -646,7 +653,15 @@ function assignLanes(stops: Stop[], lines: Line[]) {
 
   for (const line of lines) {
     const slot = slots[chosen.get(line.id)!];
-    const reach = LANES.base + slot.lane * LANES.gap;
+    /**
+     * Rail keeps to its own alignment and shares a street with nobody, so it
+     * needs only enough room to keep opposing trains apart — and whatever it
+     * uses has to fit inside a station box with a platform beside it.
+     */
+    const rail = line.mode === 'metro' || line.mode === 'train';
+    const reach = rail
+      ? RAIL.gauge + slot.lane * RAIL.spread
+      : LANES.base + slot.lane * LANES.gap;
 
     /**
      * A mitred offset at every stop: at an interior stop the bisector of the
@@ -706,6 +721,99 @@ function assignLanes(stops: Stop[], lines: Line[]) {
       return { x: n.x * out, y: n.y * out };
     });
   }
+}
+
+/**
+ * Dig out a platform box for every rail stop, and a staircase into it.
+ *
+ * The hall lies along the LINE's direction, because that is the way the
+ * platform runs; the stairs come in along the STREET, because that is where
+ * the entrance has to be for anyone to find it. The ramp ends at the middle of
+ * the hall, so the last stretch of it is a staircase rising out of the
+ * platform, which is what a staircase in a station is.
+ */
+function buildStations(streets: Streets, stops: Stop[], lines: Line[]): Station[] {
+  const out: Station[] = [];
+  for (const s of stops) {
+    for (const mode of ['metro', 'train'] as const) {
+      const here = lines.filter((l) => l.mode === mode && l.stops.includes(s.id));
+      if (!here.length) continue;
+      const line = here[0];
+
+      // Along the line, taken from the leg it runs on through this stop.
+      const i = line.stops.indexOf(s.id);
+      const other = stops[line.stops[i > 0 ? i - 1 : i + 1]];
+      const angle = Math.atan2(other.y - s.y, other.x - s.x);
+
+      /**
+       * Wide enough for its own tracks plus somewhere to stand beside them.
+       * The hall used to be a fixed width centred on the stop while the track
+       * ran off to one side in its lane, so the rails came up through the
+       * platform.
+       */
+      let widest = 0;
+      for (const l of here) {
+        const k = l.stops.indexOf(s.id);
+        if (k >= 0) widest = Math.max(widest, Math.hypot(l.lane[k].x, l.lane[k].y));
+      }
+      const hw = widest + BODIES[mode].w / 2 + STATION.platform;
+
+      /**
+       * The stairs go on the FOOTWAY, along the street, and the two modes take
+       * opposite sides — a stop with both gets one flight down and one up, and
+       * in the same place the floor under your feet has two candidates and
+       * walking into the subway carries you onto the viaduct instead.
+       */
+      const h = streets.width / 2;
+      const onVertical = streets.xs.some((x) => Math.abs(s.x - x) <= h);
+      const along = onVertical ? { x: 0, y: 1 } : { x: 1, y: 0 };
+      const across = onVertical ? { x: 1, y: 0 } : { x: 0, y: 1 };
+      const side = mode === 'metro' ? 1 : -1;
+      const foot = {
+        x: s.x + across.x * STATION.entry * side,
+        y: s.y + across.y * STATION.entry * side,
+      };
+      const run = STATION.shaftLength;
+      // Mouth at the far end, descending (or rising) towards the stop.
+      const shaftAngle = Math.atan2(along.y, along.x) + (side > 0 ? 0 : Math.PI);
+      const bottom = foot;
+      const mouth = {
+        x: bottom.x - Math.cos(shaftAngle) * run,
+        y: bottom.y - Math.sin(shaftAngle) * run,
+      };
+
+      out.push({
+        stop: s.id,
+        mode,
+        /**
+         * The PLATFORM height, which is the floor of the train and not the top
+         * of the rail. Level with the deck is what a platform is for: you step
+         * across rather than up.
+         */
+        level: LEVELS[mode] + BODIES[mode].deck,
+        hall: {
+          x: s.x, y: s.y, angle,
+          hl: (BODIES[mode].l + STATION.overhang) / 2,
+          hw,
+        },
+        shaft: {
+          x: (mouth.x + bottom.x) / 2, y: (mouth.y + bottom.y) / 2,
+          angle: shaftAngle, hl: run / 2, hw: STATION.shaftWidth / 2,
+        },
+        // The corridor from the foot of the stairs in to the platform. It is
+        // at platform level throughout and does NOT punch through the road,
+        // which is what lets the stairs stand on the pavement instead of in
+        // the middle of the carriageway.
+        passage: {
+          x: (bottom.x + s.x) / 2, y: (bottom.y + s.y) / 2,
+          angle: Math.atan2(s.y - bottom.y, s.x - bottom.x),
+          hl: Math.hypot(s.x - bottom.x, s.y - bottom.y) / 2 + 1,
+          hw: STATION.passageWidth / 2,
+        },
+      });
+    }
+  }
+  return out;
 }
 
 /**

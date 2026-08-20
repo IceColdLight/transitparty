@@ -12,7 +12,7 @@
  * departures, so a good player beats this estimate — that is the point. `par`
  * is a sanity bound, not a target.
  */
-import { SUSTAINED_WALK, WALK } from './constants.js';
+import { LEVELS, STATION, SUSTAINED_WALK, WALK } from './constants.js';
 import type { River } from './river.js';
 import { type Streets, type WalkGraph, buildWalkGraph, walkDistances } from './streets.js';
 import type { Line, Stop } from './types.js';
@@ -169,7 +169,15 @@ export function bestRoute(net: Net, from: number, to: number, walkNb?: ReturnTyp
       if (s === to) break;
       for (const w of nb[s]) relax(u, foot(w.to), w.time, false);
       for (const lineId of net.stops[s].lines) {
-        relax(u, aboard(s, lineId), net.lines[lineId].headway / 2, true);
+        /**
+         * Boarding something that is not at street level costs the stairs.
+         * A planner that thinks a platform eight metres down is free quotes
+         * journeys nobody can make in the time — and it would quietly make
+         * rail look better than it is, which is the thing the race criteria
+         * spend most of their effort correcting for.
+         */
+        const climb = LEVELS[net.lines[lineId].mode] === 0 ? 0 : STATION.access;
+        relax(u, aboard(s, lineId), net.lines[lineId].headway / 2 + climb, true);
       }
     } else {
       const lineId = net.stops[s].lines[slot - 1];

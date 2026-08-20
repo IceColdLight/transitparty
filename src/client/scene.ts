@@ -21,7 +21,7 @@
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { BODIES, CITY, LANES, PLATFORM, type ModeId } from '../shared/constants.js';
+import { BODIES, CITY, LANES, LEVELS, PLATFORM, type ModeId } from '../shared/constants.js';
 import { platformAt } from '../shared/streets.js';
 import type { City, PlayerState, Vehicle } from '../shared/types.js';
 
@@ -320,6 +320,232 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
    }
   }
 
+  /**
+   * The rail levels: tunnels for the metro, a viaduct for the train, and
+   * proper track on both.
+   *
+   * The tunnel is drawn inside-out — you only ever see it from within, and
+   * from outside it would otherwise be a dark slab lying across the city. The
+   * viaduct is drawn the usual way round, because you walk under it.
+   */
+  {
+    const rail: THREE.BufferGeometry[] = [];
+    const tunnel: THREE.BufferGeometry[] = [];
+    const deckGeo: THREE.BufferGeometry[] = [];
+    const sleeper: THREE.BufferGeometry[] = [];
+
+    for (const line of city.lines) {
+      if (line.mode !== 'metro' && line.mode !== 'train') continue;
+      const level = LEVELS[line.mode];
+      const gauge = line.mode === 'train' ? 1.5 : 1.4;
+      for (let i = 0; i + 1 < line.stops.length; i++) {
+        const a = city.stops[line.stops[i]], b = city.stops[line.stops[i + 1]];
+        const la = line.lane[i], lb = line.lane[i + 1];
+        const ax = a.x + la.x, ay = a.y + la.y, bx = b.x + lb.x, by = b.y + lb.y;
+        const dx = bx - ax, dy = by - ay;
+        const len = Math.hypot(dx, dy);
+        if (len < 1) continue;
+        const ang = Math.atan2(dy, dx);
+        const mx = (ax + bx) / 2, my = (ay + by) / 2;
+
+        const place = (
+          into: THREE.BufferGeometry[], w: number, h: number, d: number,
+          off: number, y: number,
+        ) => {
+          const g = new THREE.BoxGeometry(w, h, d);
+          g.translate(0, y, off);
+          g.rotateY(-ang);
+          g.translate(mx, 0, my);
+          into.push(g);
+        };
+
+        // two rails, and sleepers under them
+        for (const side of [-1, 1]) place(rail, len, 0.16, 0.12, side * gauge, level + 0.08);
+        const every = 3.2;
+        for (let d = -len / 2 + 1; d < len / 2; d += every) {
+          const g = new THREE.BoxGeometry(0.5, 0.14, gauge * 2.6);
+          g.translate(d, level - 0.02, 0);
+          g.rotateY(-ang);
+          g.translate(mx, 0, my);
+          sleeper.push(g);
+        }
+
+        if (line.mode === 'metro') {
+          // the bore, seen from inside
+          place(tunnel, len, 7.2, 9.5, 0, level + 3.2);
+        } else {
+          // a viaduct deck, and legs to hold it up
+          place(deckGeo, len, 1.1, 7.2, 0, level - 0.75);
+          for (let d = -len / 2 + 8; d < len / 2; d += 34) {
+            const g = new THREE.BoxGeometry(2.2, level, 2.2);
+            g.translate(d, level / 2 - 1.2, 0);
+            g.rotateY(-ang);
+            g.translate(mx, 0, my);
+            deckGeo.push(g);
+          }
+        }
+      }
+    }
+
+    const add = (list: THREE.BufferGeometry[], mat: THREE.Material) => {
+      if (!list.length) return;
+      const g = mergeGeometries(list, false)!;
+      list.forEach((x) => x.dispose());
+      scene.add(new THREE.Mesh(keep(g), mat));
+    };
+    add(rail, keep(new THREE.MeshLambertMaterial({ color: 0x9aa3ad })));
+    add(sleeper, keep(new THREE.MeshLambertMaterial({ color: 0x4a4038 })));
+    add(deckGeo, keep(new THREE.MeshLambertMaterial({ color: 0x5a5f68 })));
+    add(tunnel, keep(new THREE.MeshLambertMaterial({ color: 0x21252c, side: THREE.BackSide })));
+  }
+
+  // ── station halls, and the stairs into them ──────────────────────────────
+  /**
+   * Station surfaces are lit from within rather than by the sun, which does
+   * not reach eight metres down a hole. Emissive is the cheap way to do it —
+   * a light per station would be thirty lights in a scene that has two — and
+   * it gives exactly the reading you want: a bright room at the bottom of a
+   * dark stair, and a black tunnel either side of it.
+   */
+  const hallWall = keep(new THREE.MeshLambertMaterial({ color: 0x39414c, emissive: 0x2b323b }));
+  const hallFloor = keep(new THREE.MeshLambertMaterial({ color: 0x8a929c, emissive: 0x4c545e }));
+  const trackBed = keep(new THREE.MeshLambertMaterial({ color: 0x3a3f47, emissive: 0x1e232a }));
+
+  for (const st of city.stations) {
+    const wallMat = hallWall;
+    const floorMat = hallFloor;
+    const deck = BODIES[st.mode].deck;
+    const trackHalf = BODIES[st.mode].w / 2 + 0.8;
+
+    const put = (mesh: THREE.Mesh, r: typeof st.hall, y: number) => {
+      mesh.position.set(r.x, y, r.y);
+      mesh.rotation.y = -r.angle;
+      scene.add(mesh);
+    };
+
+    /**
+     * Two platforms with the track between them, rather than one slab with
+     * rails lying on top of it. The platform tops are flush with the train
+     * floor and the track bed is a deck's depth below, which is what makes a
+     * metro station read as a metro station at a glance.
+     */
+    const platHalf = Math.max(1.5, st.hall.hw - trackHalf) / 2;
+    for (const side of [-1, 1]) {
+      const off = side * (trackHalf + platHalf);
+      const m = new THREE.Mesh(
+        keep(new THREE.BoxGeometry(st.hall.hl * 2, 0.5, platHalf * 2)), floorMat,
+      );
+      m.position.set(
+        st.hall.x + Math.sin(-st.hall.angle) * off,
+        st.level - 0.25,
+        st.hall.y + Math.cos(-st.hall.angle) * off,
+      );
+      m.rotation.y = -st.hall.angle;
+      scene.add(m);
+    }
+    put(new THREE.Mesh(
+      keep(new THREE.BoxGeometry(st.hall.hl * 2, 0.4, trackHalf * 2)), trackBed,
+    ), st.hall, st.level - deck - 0.2);
+
+    // side walls and a ceiling, so a tunnel station feels like a room
+    for (const side of [-1, 1]) {
+      const w = new THREE.Mesh(
+        keep(new THREE.BoxGeometry(st.hall.hl * 2, 5.2, 0.5)), wallMat,
+      );
+      w.position.set(
+        st.hall.x + Math.sin(-st.hall.angle) * side * st.hall.hw,
+        st.level + 2.6,
+        st.hall.y + Math.cos(-st.hall.angle) * side * st.hall.hw,
+      );
+      w.rotation.y = -st.hall.angle;
+      scene.add(w);
+    }
+    if (st.mode === 'metro') {
+      put(new THREE.Mesh(
+        keep(new THREE.BoxGeometry(st.hall.hl * 2, 0.4, st.hall.hw * 2)), wallMat,
+      ), st.hall, st.level + 5.2);
+    }
+
+    /**
+     * The stairs. Drawn as actual steps rather than a slope — a ramp reads as
+     * a car park, and the thing a player has to spot from the street is a
+     * staircase. The walkable surface underneath is the ramp; the steps sit on
+     * it, which is close enough at this size that nobody will catch it out.
+     */
+    const steps = 14;
+    for (let i = 0; i < steps; i++) {
+      const t = (i + 0.5) / steps;
+      const lx = -st.shaft.hl + t * st.shaft.hl * 2;
+      const at = {
+        x: st.shaft.x + Math.cos(st.shaft.angle) * lx,
+        y: st.shaft.y + Math.sin(st.shaft.angle) * lx,
+      };
+      const g = new THREE.Mesh(
+        keep(new THREE.BoxGeometry(st.shaft.hl * 2 / steps, 0.5, st.shaft.hw * 2)), floorMat,
+      );
+      g.position.set(at.x, st.level * t - 0.25, at.y);
+      g.rotation.y = -st.shaft.angle;
+      scene.add(g);
+      // Walls down both sides, because the stairwell has them: you go in at
+      // the top and come out at the bottom, not over the side halfway down.
+      for (const side of [-1, 1]) {
+        const w = new THREE.Mesh(
+          keep(new THREE.BoxGeometry(st.shaft.hl * 2 / steps, 1.1, 0.3)), wallMat,
+        );
+        w.position.set(
+          at.x + Math.sin(-st.shaft.angle) * side * st.shaft.hw,
+          st.level * t + 0.55,
+          at.y + Math.cos(-st.shaft.angle) * side * st.shaft.hw,
+        );
+        w.rotation.y = -st.shaft.angle;
+        scene.add(w);
+      }
+    }
+
+    // the passage from the foot of the stairs in to the platform
+    {
+      const pw = new THREE.Mesh(
+        keep(new THREE.BoxGeometry(st.passage.hl * 2, 0.4, st.passage.hw * 2)), floorMat,
+      );
+      pw.position.set(st.passage.x, st.level - 0.2, st.passage.y);
+      pw.rotation.y = -st.passage.angle;
+      scene.add(pw);
+      if (st.mode === 'metro') {
+        const roof = new THREE.Mesh(
+          keep(new THREE.BoxGeometry(st.passage.hl * 2, 0.35, st.passage.hw * 2)), wallMat,
+        );
+        roof.position.set(st.passage.x, st.level + 3.2, st.passage.y);
+        roof.rotation.y = -st.passage.angle;
+        scene.add(roof);
+      }
+    }
+
+    // a sign at the mouth of the stairs, so it can be found from the street
+    const mouth = {
+      x: st.shaft.x - Math.cos(st.shaft.angle) * st.shaft.hl,
+      y: st.shaft.y - Math.sin(st.shaft.angle) * st.shaft.hl,
+    };
+    const entry = new THREE.Mesh(
+      keep(new THREE.PlaneGeometry(3.0, 0.94)),
+      keep(new THREE.MeshBasicMaterial({
+        map: keep(makeSign(city.stops[st.stop].name,
+          city.stops[st.stop].lines
+            .filter((l) => city.lines[l].mode === st.mode)
+            .map((l) => city.lines[l].color),
+          st.mode === 'metro' ? '#4aa3df' : '#8f6ec4')),
+        side: THREE.DoubleSide,
+      })),
+    );
+    entry.position.set(mouth.x, 2.6, mouth.y);
+    entry.rotation.y = -st.shaft.angle + Math.PI / 2;
+    scene.add(entry);
+    // Back to back, or half the city reads "ferhabtpuaH".
+    const entryTwin = entry.clone();
+    entryTwin.rotation.y += Math.PI;
+    entryTwin.position.set(mouth.x, 2.6, mouth.y);
+    scene.add(entryTwin);
+  }
+
   // ── where you are going, and where you started ───────────────────────────
   /**
    * Starts well above head height. At ground level it was a coloured wall
@@ -524,7 +750,10 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
       for (const v of vehicles) {
         const mesh = vehicleMeshes.get(v.id);
         if (!mesh) continue;
-        mesh.position.set(v.x, 0, v.y);
+        // At its own level: a metro is in a tunnel, a train is on a viaduct.
+        // This was pinned to zero and every metro in the city drove down the
+        // middle of the road with the buses.
+        mesh.position.set(v.x, v.level, v.y);
         mesh.rotation.y = -v.angle;
       }
     },

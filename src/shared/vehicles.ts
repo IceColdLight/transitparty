@@ -18,7 +18,7 @@
  * therefore get a double dwell, which is the turnaround, and which is why a
  * terminus is the one place you can reliably catch something you just missed.
  */
-import { BODIES, TEMPO, type ModeId } from './constants.js';
+import { BODIES, LEVELS, TEMPO, type ModeId } from './constants.js';
 import type { City, Line, Vehicle } from './types.js';
 
 /** Seconds into this vehicle's cycle. */
@@ -77,10 +77,14 @@ function locate(city: City, line: Line, run: number, time: number): Vehicle {
     const w = Math.max(0, 1 - u / BERTH_FADE);
     return { x: b.x * w, y: b.y * w };
   };
+  const level = LEVELS[city.lines[line.id].mode];
   const mk = (
     x: number, y: number, angle: number, atStop: number, nextStop: number,
     eta: number, doorTime: number,
-  ): Vehicle => ({ id: `${line.id}.${run}`, line: line.id, run, x, y, angle, dir, atStop, nextStop, eta, doorTime });
+  ): Vehicle => ({
+    id: `${line.id}.${run}`, line: line.id, run, x, y, angle, dir, level,
+    atStop, nextStop, eta, doorTime,
+  });
 
   for (let i = 0; i < n; i++) {
     if (q < line.dwell) {
@@ -229,7 +233,10 @@ export function deckUnder(
   let best: { vehicle: Vehicle; height: number } | null = null;
   for (const v of vehicles) {
     if (!overVehicle(city, v, x, y)) continue;
-    const height = BODIES[city.lines[v.line].mode].deck;
+    // The deck sits on the vehicle's own plane: a tunnel floor, a viaduct, or
+    // the road. Without the level a metro's deck reads as being at street
+    // height and pedestrians are lifted onto trains eight metres below them.
+    const height = v.level + BODIES[city.lines[v.line].mode].deck;
     if (height > feet + reach) continue;
     /**
      * You stay on what you are already standing on.

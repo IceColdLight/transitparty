@@ -187,6 +187,59 @@ correct at a stop being applied where the vehicle is DRIVING:
 
 ---
 
+## Three levels, and stairs between them
+
+The metro runs eight metres under the road and the train nine metres over it,
+on proper track. Getting to either means finding a staircase, which gives the
+player a second kind of wayfinding on top of reading the map: you surface
+somewhere and have to work out where you are, and a change from the metro to a
+bus is a climb rather than a step sideways.
+
+The mechanism that makes two levels work at all is that **a point can have more
+than one floor** — the road above and the platform below — and you stand on
+whichever is nearest beneath your feet. It is the same rule that already
+decided whether you were on the street or on a bus deck, extended to the
+ground itself. A station is three rectangles:
+
+  hall     the platform box, on the line's own axis, wide enough for its
+           tracks plus somewhere to stand beside them
+  shaft    the stairs, on the FOOTWAY and along the street
+  passage  the corridor from the foot of the stairs in to the platform
+
+Five things went wrong, and four of them are the same mistake in different
+clothes — **a rule that is right for one level applied to another**:
+
+- **Vehicles were drawn at y=0 regardless of level**, so every metro in the
+  city drove down the middle of the road with the buses. The physics was
+  already underground; only the picture was wrong.
+- **A stop served by both a metro and a train got two staircases in the same
+  place**, one down and one up. The floor under your feet then has two
+  candidates, the game picks the higher, and walking into a subway entrance
+  carries you up onto the viaduct. They now take opposite sides of the stop.
+- **The stairwell was on the carriageway.** The entrance was put at the stop,
+  which is the middle of the road, so a stairwell was a hole in the road with
+  buses driving through it. It goes on the footway now, with a passage inward
+  at platform level — and the passage does NOT punch through the road, which
+  is what lets the stairs stand on the pavement.
+- **Suppressing the street under an ascending flight** deleted the road beneath
+  every elevated station. Only a stairwell going DOWN is a hole in the
+  pavement; one going up is a thing standing on it.
+- **The hall was a fixed width centred on the stop while the track ran off to
+  one side in its lane**, so the rails came up through the platform. It is
+  sized from the lines that actually call there.
+
+A stairwell also needed WALLS. Without them you can walk off the side halfway
+down and reappear on the road above, and anyone on the pavement can wander
+into the hole sideways. You go in at the top and out at the bottom.
+
+The route planner charges `STATION.access` for boarding anything not at street
+level. A planner that thinks a platform eight metres down is free quotes
+journeys nobody can make in the time — and it would quietly make rail look
+better than it is, which is the thing the race criteria spend most of their
+effort correcting for.
+
+---
+
 ## Riding is a surface, not a state
 
 There is no board key, no boarding rule and no `riding` transition anywhere. A
