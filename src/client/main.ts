@@ -19,7 +19,7 @@ import * as THREE from 'three';
 import { INTERP_DELAY_MS, PLAYER, RACE, STAMINA } from '../shared/constants.js';
 import { buildCity } from '../shared/city.js';
 import { type Body, newBody, stepBody } from '../shared/movement.js';
-import { allVehicles, vehicleById } from '../shared/vehicles.js';
+import { allVehicles, toLocal, toWorld, vehicleById } from '../shared/vehicles.js';
 import type { City, PlayerState, WorldState } from '../shared/types.js';
 import { connect } from './net.js';
 import { drawMap } from './map.js';
@@ -170,6 +170,8 @@ let scene3d: Scene3D | null = null;
 let prev: WorldState | null = null;
 let curr: WorldState | null = null;
 let simTime = 0;
+/** How fast the local clock runs relative to real time while it catches up. */
+let timeRate = 1;
 const me: Body = newBody(0, 0);
 let mePrimed = false;
 
@@ -189,8 +191,19 @@ const net = connect(serverUrl, {
       prev = null;
       mapDrawnAt = -1;
     }
+    /**
+     * Nudge the CLOCK RATE, not the clock.
+     *
+     * Adding a fraction of the error straight onto the clock made it wobble:
+     * the server's time advances in fixed steps and arrives twice per three
+     * of them, so the error alternates, and everything on rails is a pure
+     * function of that clock — a wobbling clock is a wobbling city. Steering
+     * the rate keeps time monotone and smooth, and a big enough error is
+     * still a snap, because that is a dropped connection rather than drift.
+     */
     const d = msg.state.time - simTime;
-    if (Math.abs(d) > 0.35) simTime = msg.state.time; else simTime += d * 0.12;
+    if (Math.abs(d) > 0.4) { simTime = msg.state.time; timeRate = 1; }
+    else timeRate = 1 + Math.max(-0.12, Math.min(0.12, d * 0.8));
   },
 });
 
@@ -200,20 +213,41 @@ nameEl.addEventListener('change', () => {
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
-function othersAt(t: number): PlayerState[] {
+function othersAt(t: number, at: number): PlayerState[] {
   if (!curr) return [];
-  return curr.players.map((c) => {
-    const p: PlayerState = { ...c };
-    if (prev) {
-      const a = prev.players.find((q) => q.id === p.id);
-      const span = curr!.time - prev.time;
-      if (a && span > 1e-6) {
-        const u = Math.max(0, Math.min(1, (t - prev.time) / span));
-        p.x = a.x + (p.x - a.x) * u;
-        p.y = a.y + (p.y - a.y) * u;
-        p.h = a.h + (p.h - a.h) * u;
+  const c0 = city;
+  return curr.players.map((q) => {
+    const p: PlayerState = { ...q };
+    if (!prev) return p;
+    const a = prev.players.find((z) => z.id === p.id);
+    const span = curr!.time - prev.time;
+    if (!a || span <= 1e-6) return p;
+    const u = Math.max(0, Math.min(1, (t - prev.time) / span));
+    p.h = a.h + (p.h - a.h) * u;
+
+    /**
+     * A passenger is interpolated ON THE DECK, not across the ground.
+     *
+     * Blending two world positions taken half a packet apart on a vehicle
+     * doing thirty metres a second slides them along the floor and leaves them
+     * trailing wherever it has got to since. Interpolating where they STAND
+     * and then putting that back on the vehicle at the moment being drawn
+     * makes a full carriage move as one solid object again.
+     */
+    if (c0 && p.riding && a.riding === p.riding) {
+      const was = vehicleById(c0, p.riding, prev.time);
+      const now = vehicleById(c0, p.riding, curr!.time);
+      const here = vehicleById(c0, p.riding, at);
+      if (was && now && here) {
+        const la = toLocal(was, a.x, a.y);
+        const lb = toLocal(now, q.x, q.y);
+        const w = toWorld(here, la.lx + (lb.lx - la.lx) * u, la.ly + (lb.ly - la.ly) * u);
+        p.x = w.x; p.y = w.y;
+        return p;
       }
     }
+    p.x = a.x + (p.x - a.x) * u;
+    p.y = a.y + (p.y - a.y) * u;
     return p;
   });
 }
@@ -224,7 +258,7 @@ function frame(now: number) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, (now - lastFrame) / 1000);
   lastFrame = now;
-  simTime += dt;
+  simTime += dt * timeRate;
 
   if (!city || !curr || !scene3d) return;
   const c = city;
@@ -271,11 +305,37 @@ function frame(now: number) {
     // about where you are. While it holds, ease toward the server; when it
     // breaks, the prediction is about a different surface and has to be
     // abandoned outright rather than blended into nonsense.
+    const k = Math.min(1, dt * 5);
     if (server.riding !== me.riding) {
       me.x = server.x; me.y = server.y; me.h = server.h; me.riding = server.riding;
       me.vx = 0; me.vy = 0; me.vh = 0;
+    } else if (me.riding) {
+      /**
+       * Aboard something, correct in the VEHICLE's frame, not the world's.
+       *
+       * The server reports where you were on its clock and the client predicts
+       * where you are on its own, and the two clocks are never quite equal. In
+       * world space the difference is mostly the vehicle's own travel — three
+       * metres of it on a train at a tenth of a second — so a world-space
+       * correction spends every frame dragging the player backwards along the
+       * deck while the carry pushes them forwards. That fight is the jitter.
+       *
+       * Comparing where you stand ON THE DECK removes the vehicle's motion
+       * from the question entirely: both ends agree you are two metres from
+       * the door, whatever the clock says.
+       */
+      const atServer = vehicleById(c, me.riding, curr.time);
+      const atClient = vehicleById(c, me.riding, simTime);
+      if (atServer && atClient) {
+        const want = toLocal(atServer, server.x, server.y);
+        const have = toLocal(atClient, me.x, me.y);
+        const w = toWorld(atClient,
+          have.lx + (want.lx - have.lx) * k,
+          have.ly + (want.ly - have.ly) * k);
+        me.x = w.x; me.y = w.y;
+      }
+      me.h += (server.h - me.h) * k;
     } else {
-      const k = Math.min(1, dt * 5);
       me.x += (server.x - me.x) * k;
       me.y += (server.y - me.y) * k;
       me.h += (server.h - me.h) * k;
@@ -291,7 +351,7 @@ function frame(now: number) {
   camera.position.set(me.x, me.h + PLAYER.eye, me.y);
   camera.rotation.set(pitch, -(facing + Math.PI / 2), 0);
 
-  const people = othersAt(simTime - interpDelay);
+  const people = othersAt(simTime - interpDelay, simTime);
   scene3d.updateVehicles(c, vehicles);
   scene3d.updatePlayers(people, selfId);
 

@@ -329,7 +329,7 @@ export type ModeId = 'train' | 'metro' | 'tram' | 'bus';
  * to keep opposing trains apart — and everything has to fit inside the station
  * box with room for a platform beside it.
  */
-export const RAIL = { gauge: 2.7, spread: 5.6 };
+export const RAIL = { gauge: 2.7, spread: 3.4 };
 
 /**
  * What height each mode runs at. The metro is in a tunnel and the train is on

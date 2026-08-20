@@ -228,6 +228,20 @@ clothes — **a rule that is right for one level applied to another**:
   one side in its lane**, so the rails came up through the platform. It is
   sized from the lines that actually call there.
 
+Two more came out of playing it:
+
+- **The station and its own track did not line up.** The hall was centred on
+  the stop and its track bed drawn a fixed width about that centre, while the
+  rails run at the LINE's lane offsets — so the train arrived in a grey box
+  with its rails alongside, ignoring the track that had been laid. The bed is
+  now measured from the lanes that actually call there, and a rail line's lane
+  spread was cut, because a station has to be wide enough to hold both tracks
+  and a platform and buildings have to be cleared out of it.
+- **You could walk out over the rails on thin air**, which on an elevated
+  station is nine metres of it. The hall is two floors now: the platform, and
+  the track bed a deck's depth below it. You can drop down onto the track; the
+  bodywork stops you being there when a train is.
+
 A stairwell also needed WALLS. Without them you can walk off the side halfway
 down and reappear on the road above, and anyone on the pavement can wander
 into the hole sideways. You go in at the top and out at the bottom.
@@ -237,6 +251,32 @@ level. A planner that thinks a platform eight metres down is free quotes
 journeys nobody can make in the time — and it would quietly make rail look
 better than it is, which is the thing the race criteria spend most of their
 effort correcting for.
+
+---
+
+## Reconcile a passenger on the deck, not on the ground
+
+Riding anything jittered badly, and the cause is worth remembering because it
+looks like a rendering problem and is not.
+
+The server reports where you were on ITS clock; the client predicts where you
+are on its own; the two are never quite equal. In world space almost all of
+that difference is the vehicle's own travel — three metres on a train at a
+tenth of a second — so a world-space correction spends every frame dragging
+the player backwards along the deck while the carry pushes them forwards.
+That fight is the jitter, and it gets worse the faster the vehicle goes.
+
+Comparing where you stand ON THE DECK removes the vehicle's motion from the
+question entirely: both ends agree you are two metres from the door, whatever
+the clock says. The same trick fixes other passengers, who were being
+interpolated across the ground between two samples taken half a packet apart
+and trailing wherever their vehicle had got to since.
+
+The clock itself was the other half. Adding a fraction of the error straight
+onto it made it wobble — the server's time advances in fixed steps and arrives
+twice per three of them, so the error alternates — and since everything on
+rails is a pure function of that clock, **a wobbling clock is a wobbling
+city**. Steer the RATE instead and time stays monotone and smooth.
 
 ---
 

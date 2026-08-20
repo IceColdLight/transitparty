@@ -756,7 +756,8 @@ function buildStations(streets: Streets, stops: Stop[], lines: Line[]): Station[
         const k = l.stops.indexOf(s.id);
         if (k >= 0) widest = Math.max(widest, Math.hypot(l.lane[k].x, l.lane[k].y));
       }
-      const hw = widest + BODIES[mode].w / 2 + STATION.platform;
+      const trackHalf = widest + BODIES[mode].w / 2;
+      const hw = trackHalf + STATION.platform;
 
       /**
        * The stairs go on the FOOTWAY, along the street, and the two modes take
@@ -796,6 +797,8 @@ function buildStations(streets: Streets, stops: Stop[], lines: Line[]): Station[
           hl: (BODIES[mode].l + STATION.overhang) / 2,
           hw,
         },
+        trackHalf,
+        deck: BODIES[mode].deck,
         shaft: {
           x: (mouth.x + bottom.x) / 2, y: (mouth.y + bottom.y) / 2,
           angle: shaftAngle, hl: run / 2, hw: STATION.shaftWidth / 2,

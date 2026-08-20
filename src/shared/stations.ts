@@ -30,10 +30,19 @@ export type Station = {
   /** floor height of the platform: below the street for a metro, above for a train */
   level: number;
   hall: Rect;
+  /**
+   * Half the width of the track bed inside the hall, measured from its middle.
+   * The tracks sit at the line's own lane offsets, NOT on the centre of the
+   * station, so this has to be derived from them — assuming otherwise put the
+   * rails up through the platform and parked the train on the pavement.
+   */
+  trackHalf: number;
   /** runs from its street end (height 0) to its far end (height `level`) */
   shaft: Rect;
   /** the corridor from the foot of the stairs to the platform, all at `level` */
   passage: Rect;
+  /** the drop from the platform to the track bed — the vehicle's floor height */
+  deck: number;
 };
 
 /** An oriented rectangle: centre, heading, and half-extents along and across. */
@@ -43,6 +52,13 @@ export function inRect(r: Rect, x: number, y: number, grow = 0): boolean {
   const dx = x - r.x, dy = y - r.y;
   const c = Math.cos(-r.angle), s = Math.sin(-r.angle);
   return Math.abs(dx * c - dy * s) <= r.hl + grow && Math.abs(dx * s + dy * c) <= r.hw + grow;
+}
+
+/** How far across a rectangle a point lies, from its centre line. */
+export function acrossRect(r: Rect, x: number, y: number): number {
+  const dx = x - r.x, dy = y - r.y;
+  const c = Math.cos(-r.angle), s = Math.sin(-r.angle);
+  return Math.abs(dx * s + dy * c);
 }
 
 /** How far along a rectangle a point lies, 0 at one end and 1 at the other. */
@@ -81,7 +97,15 @@ export function footingAt(city: City, x: number, y: number): Footing {
        * an ascending flight deleted the road beneath every elevated station.
        */
       if (h < -0.1) inShaft = true;
-    } else if (inRect(st.hall, x, y) || inRect(st.passage, x, y)) {
+    } else if (inRect(st.hall, x, y)) {
+      /**
+       * The platform, or the track bed between the platforms — which is a
+       * deck's depth lower, because that is what makes the platform level with
+       * the train floor. Without the distinction you walk out over the rails
+       * on thin air, which on an elevated station is nine metres of it.
+       */
+      floors.push(acrossRect(st.hall, x, y) <= st.trackHalf ? st.level - st.deck : st.level);
+    } else if (inRect(st.passage, x, y)) {
       floors.push(st.level);
     }
   }

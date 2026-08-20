@@ -23,6 +23,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { BODIES, CITY, LANES, LEVELS, PLATFORM, type ModeId } from '../shared/constants.js';
 import { platformAt } from '../shared/streets.js';
+import { inRect } from '../shared/stations.js';
 import type { City, PlayerState, Vehicle } from '../shared/types.js';
 
 /** Stable pseudo-randomness for a point, so buildings vary and never shimmer. */
@@ -129,6 +130,14 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
       railSegs.push({ ax: a.x, ay: a.y, bx: b.x, by: b.y });
     }
   }
+  /**
+   * Stations get cleared too, and by their own footprint rather than by the
+   * rail corridor's — a hall is much wider than the track it serves, so a
+   * tower block could stand squarely inside an elevated station.
+   */
+  const inStation = (x: number, y: number, r: number) =>
+    city.stations.some((st) => inRect(st.hall, x, y, r) || inRect(st.passage, x, y, r));
+
   const CLEARANCE = 15;
   const onRail = (x: number, y: number, r: number) => {
     for (const s2 of railSegs) {
@@ -155,7 +164,9 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
         const inset = 1 + n * 2.5;
         const w = cw - inset * 2, d = ch - inset * 2;
         if (w < 6 || d < 6) continue;
-        if (onRail(gx + inset + w / 2, gy + inset + d / 2, Math.min(w, d) / 2)) continue;
+        const cx2 = gx + inset + w / 2, cy2 = gy + inset + d / 2;
+        if (onRail(cx2, cy2, Math.min(w, d) / 2)) continue;
+        if (inStation(cx2, cy2, Math.min(w, d) / 2)) continue;
         boxes.push({
           x: gx + inset + w / 2, z: gy + inset + d / 2, w, d,
           h: 11 + n * 34 + hash2(gy, gx) * 12,
@@ -414,8 +425,10 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
   for (const st of city.stations) {
     const wallMat = hallWall;
     const floorMat = hallFloor;
-    const deck = BODIES[st.mode].deck;
-    const trackHalf = BODIES[st.mode].w / 2 + 0.8;
+    const deck = st.deck;
+    // From the station, not from the vehicle: the tracks lie at the line's own
+    // lane offsets and the drawn bed has to be as wide as they are far apart.
+    const trackHalf = st.trackHalf;
 
     const put = (mesh: THREE.Mesh, r: typeof st.hall, y: number) => {
       mesh.position.set(r.x, y, r.y);

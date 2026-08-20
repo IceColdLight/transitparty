@@ -165,6 +165,13 @@ if (rider) shoot('fp-riding', rider.x, rider.y, 0.5, rider.angle);
   if (tr) {
     shoot('viaduct', tr.hall.x - Math.cos(tr.hall.angle) * 60,
       tr.hall.y - Math.sin(tr.hall.angle) * 60, 0, tr.hall.angle, 0.25);
+    // On the elevated platform, looking down the track.
+    const across = tr.hall.angle + Math.PI / 2;
+    const off = tr.trackHalf + 1.6;
+    shoot('platform-over',
+      tr.hall.x + Math.cos(across) * off - Math.cos(tr.hall.angle) * (tr.hall.hl - 4),
+      tr.hall.y + Math.sin(across) * off - Math.sin(tr.hall.angle) * (tr.hall.hl - 4),
+      tr.level, tr.hall.angle);
   }
 }
 
