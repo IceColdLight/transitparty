@@ -1,0 +1,21 @@
+{
+  "name": "transitparty",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "server": "tsx watch src/server/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx tests/run.ts"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/ws": "^8.5.10",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0",
+    "vite": "^5.2.0"
+  }
+}

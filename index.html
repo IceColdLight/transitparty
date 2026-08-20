@@ -1,0 +1,163 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Transit Party</title>
+    <style>
+      html, body { margin: 0; padding: 0; overflow: hidden; background: #0c1016;
+        font-family: system-ui, sans-serif; color: #e7edf3; }
+      canvas { display: block; }
+
+      /* ── HUD ──────────────────────────────────────────────────────────
+         Top centre : the race — where from, where to, and the clock.
+         Top left   : what YOU are doing right now.
+         Top right  : who is winning.
+         Bottom left: the departure board where you are standing.
+         Bottom mid : the one key that does anything.                    */
+
+      .panel {
+        background: rgba(8, 12, 17, 0.72);
+        border: 1px solid rgba(255,255,255,0.13);
+        border-radius: 7px;
+        backdrop-filter: blur(3px);
+        text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+      }
+
+      #race {
+        position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+        padding: 8px 18px; text-align: center; pointer-events: none;
+        display: flex; flex-direction: column; align-items: center; gap: 3px;
+      }
+      #race .od { font-size: 15px; font-weight: 700; letter-spacing: 0.4px; white-space: nowrap; }
+      #race .od .from { color: #7fe08a; }
+      #race .od .to { color: #ffd166; }
+      #race .od .arrow { color: #7f8f9c; margin: 0 8px; }
+      #race .clock { font-size: 24px; font-weight: 800; letter-spacing: 1.5px;
+        font-variant-numeric: tabular-nums; line-height: 1.1; }
+      #race .par { font-size: 10px; letter-spacing: 1.2px; color: #7f8f9c; text-transform: uppercase; }
+
+      #status {
+        position: fixed; top: 10px; left: 10px; min-width: 220px; max-width: 300px;
+        padding: 8px 12px; font-size: 12px; line-height: 1.6; pointer-events: none;
+      }
+      #status .k { display: inline-block; min-width: 62px; font-size: 10px;
+        letter-spacing: 1px; color: #78889a; text-transform: uppercase; }
+      #status .v { color: #dfe8ee; font-weight: 600; }
+      #status .big { font-size: 14px; }
+
+      #standings {
+        position: fixed; top: 10px; right: 10px; min-width: 170px;
+        padding: 8px 12px; font-size: 12px; line-height: 1.7; pointer-events: none;
+      }
+      #standings .row { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+      #standings .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+      #standings .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+      #standings .tm { color: #9fb0c0; font-variant-numeric: tabular-nums; font-size: 11px; }
+      #standings .me { font-weight: 800; }
+
+      /* the departure board — the whole game is played on this */
+      #board {
+        position: fixed; left: 10px; bottom: 10px; min-width: 244px;
+        padding: 8px 11px 9px; font-size: 12px; display: none;
+      }
+      #board .hd { font-size: 10px; letter-spacing: 1.4px; color: #78889a;
+        text-transform: uppercase; margin-bottom: 5px; }
+      #board .hd b { color: #e7edf3; font-size: 12px; letter-spacing: 0.3px; }
+      #board .dep { display: flex; align-items: center; gap: 8px; line-height: 1.85; }
+      #board .badge { flex: none; min-width: 30px; text-align: center; padding: 1px 5px;
+        border-radius: 4px; font-size: 11px; font-weight: 800; color: #0c1016; }
+      #board .dest { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        color: #c3d0dc; }
+      #board .in { font-variant-numeric: tabular-nums; color: #9fb0c0; }
+      #board .now { color: #7fe08a; font-weight: 800; }
+      #board .soon { color: #ffd166; }
+
+      #prompt {
+        position: fixed; left: 50%; bottom: 62px; transform: translateX(-50%);
+        text-align: center; pointer-events: none; max-width: 60vw;
+        font-size: 15px; font-weight: 700; letter-spacing: 0.3px;
+        text-shadow: 0 2px 7px black, 0 0 16px rgba(0,0,0,0.85);
+      }
+      #prompt kbd {
+        display: inline-block; padding: 1px 7px; margin: 0 3px; border-radius: 4px;
+        background: rgba(255,255,255,0.16); border: 1px solid rgba(255,255,255,0.3);
+        font: inherit; font-size: 13px; font-weight: 800;
+      }
+
+      #hint {
+        position: fixed; right: 10px; bottom: 10px; padding: 6px 10px;
+        font-size: 11px; color: #8b9aa8; line-height: 1.7; text-align: right;
+      }
+      #hint b { color: #cfdae4; }
+      #hint #status-net { color: #7f8f9c; }
+
+      #name {
+        position: fixed; right: 10px; bottom: 92px; width: 132px;
+        padding: 5px 8px; font: inherit; font-size: 12px;
+        color: #e7edf3; background: rgba(8,12,17,0.8);
+        border: 1px solid rgba(255,255,255,0.18); border-radius: 6px; outline: none;
+      }
+      #name:focus { border-color: rgba(127,224,138,0.7); }
+
+      /* between rounds */
+      #results {
+        position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+        background: rgba(6, 9, 13, 0.82); backdrop-filter: blur(4px); z-index: 20;
+      }
+      #results .card { min-width: 340px; padding: 22px 28px; text-align: center; }
+      #results h2 { margin: 0 0 4px; font-size: 20px; letter-spacing: 1px; }
+      #results .sub { font-size: 12px; color: #8b9aa8; margin-bottom: 16px; }
+      #results .row { display: flex; align-items: center; gap: 10px; font-size: 14px;
+        line-height: 2.1; text-align: left; }
+      #results .pl { width: 22px; color: #78889a; font-weight: 800; }
+      #results .dot { width: 10px; height: 10px; border-radius: 50%; }
+      #results .nm { flex: 1; }
+      #results .tm { font-variant-numeric: tabular-nums; font-weight: 700; }
+      #results .next { margin-top: 16px; font-size: 12px; color: #ffd166; letter-spacing: 1px; }
+
+      #maphint {
+        position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+        font-size: 11px; letter-spacing: 1.4px; color: #7f8f9c; text-transform: uppercase;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="race" class="panel">
+      <div class="od"><span class="from" id="od-from">—</span><span class="arrow">→</span><span class="to" id="od-to">—</span></div>
+      <div class="clock" id="clock">0:00</div>
+      <div class="par" id="par">&nbsp;</div>
+    </div>
+
+    <div id="status" class="panel">
+      <div><span class="k">You</span><span class="v big" id="s-what">walking</span></div>
+      <div><span class="k">Next</span><span class="v" id="s-next">—</span></div>
+      <div><span class="k">To go</span><span class="v" id="s-togo">—</span></div>
+    </div>
+
+    <div id="standings" class="panel"></div>
+
+    <div id="board" class="panel"></div>
+
+    <div id="prompt"></div>
+
+    <input id="name" maxlength="16" placeholder="your name" />
+
+    <div id="hint" class="panel">
+      <div><b>WASD</b> walk &nbsp; <b>E</b> board / get off</div>
+      <div><b>TAB</b> network map &nbsp; <b>R</b> unstick</div>
+      <div id="status-net">connecting…</div>
+    </div>
+
+    <div id="maphint">hold <b>TAB</b> for the network map</div>
+
+    <div id="results"><div class="card panel">
+      <h2 id="r-title">Round over</h2>
+      <div class="sub" id="r-sub"></div>
+      <div id="r-rows"></div>
+      <div class="next" id="r-next"></div>
+    </div></div>
+
+    <script type="module" src="/src/client/main.ts"></script>
+  </body>
+</html>
