@@ -549,7 +549,9 @@ yourself the work — and that only becomes a skill rather than a punishment if
 the city can actually be read. So:
 
 - **Every street has a name**, on a plate at every junction, facing down the
-  street it names. Twenty-odd names to a city; the plates share a material per
+  street it names, on a dark blue ground — street names and station names hang
+  at similar heights on similar poles and both say a place name, so colour is
+  the only thing telling them apart at a glance. Twenty-odd names to a city; the plates share a material per
   name, because a hundred and sixty junctions would otherwise mean six hundred
   textures of two dozen words.
 - **Every interchange is labelled on the map**, not just the busiest ones, and
@@ -559,6 +561,19 @@ the city can actually be read. So:
 Rivals stay on the map. Watching somebody take the wrong bridge is most of the
 point of racing, and if one is standing next to you and gives your position
 away, that is something you earned by keeping up with them.
+
+---
+
+## The sky has to follow you
+
+A sky sphere left at the world origin is a sphere you can walk out of. This
+city is 3000m across and the sphere was 3000m in radius, so near the far
+corner a player was standing OUTSIDE their own sky, looking at the culled back
+of it — which renders as a black circle overhead.
+
+It follows the camera now, never writes depth, and is not frustum culled, and
+`scene.background` is set to the horizon colour as a fallback. If the sphere
+is ever missed the result should be a plain blue, never a hole.
 
 ---
 

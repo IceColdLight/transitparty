@@ -132,13 +132,20 @@
       #hint b { color: #cfdae4; }
       #hint #status-net { color: #7f8f9c; }
 
+      /* the way in: give a name, take the mouse */
+      #join { margin-top: 18px; display: flex; gap: 8px; justify-content: center; }
       #name {
-        position: fixed; right: 10px; bottom: 92px; width: 132px;
-        padding: 5px 8px; font: inherit; font-size: 12px;
-        color: #e7edf3; background: rgba(8,12,17,0.8);
-        border: 1px solid rgba(255,255,255,0.18); border-radius: 6px; outline: none;
+        width: 160px; padding: 8px 10px; font: inherit; font-size: 13px;
+        color: #e7edf3; background: rgba(8,12,17,0.85); text-align: center;
+        border: 1px solid rgba(255,255,255,0.22); border-radius: 6px; outline: none;
       }
-      #name:focus { border-color: rgba(127,224,138,0.7); }
+      #name:focus { border-color: rgba(127,224,138,0.8); }
+      #play {
+        padding: 8px 20px; font: inherit; font-size: 13px; font-weight: 800;
+        letter-spacing: 0.6px; cursor: pointer; color: #0c1016; background: #ffd166;
+        border: none; border-radius: 6px;
+      }
+      #play:hover { background: #ffdd8c; }
 
       /* between rounds */
       #results {
@@ -172,11 +179,6 @@
 
     <div id="crosshair"></div>
 
-    <div id="status" class="panel">
-      <div><span class="k">You</span><span class="v big" id="s-what">on foot</span></div>
-      <div><span class="v" id="s-togo">—</span></div>
-    </div>
-
     <div id="standings" class="panel"></div>
 
     <!-- Departure board — disabled for now; see the note in src/client/main.ts.
@@ -188,8 +190,6 @@
       <div id="stam-track"><div id="stam-fill"></div></div>
       <div id="stam-label">shift to run</div>
     </div>
-
-    <input id="name" maxlength="16" placeholder="your name" />
 
     <div id="hint" class="panel">
       <div><b>WASD</b> walk &nbsp; <b>SHIFT</b> run &nbsp; <b>SPACE</b> jump</div>
@@ -207,7 +207,10 @@
         <div><b>WASD</b> walk &nbsp;&nbsp; <b>SHIFT</b> run &nbsp;&nbsp; <b>SPACE</b> jump</div>
         <div><b>TAB</b> hold up your map</div>
       </div>
-      <p style="margin-top:16px; color:#ffd166">click to play</p>
+      <form id="join">
+        <input id="name" maxlength="16" placeholder="your name" autocomplete="off" />
+        <button id="play" type="submit">Play</button>
+      </form>
     </div></div>
 
     <div id="results"><div class="card panel">

@@ -77,7 +77,7 @@ interpolation buffer.
 
 ## How to play
 
-Click the window to take the mouse.
+Type a name and hit **Play** — that takes the mouse as well.
 
 | Key | |
 | --- | --- |

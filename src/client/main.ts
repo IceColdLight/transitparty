@@ -32,9 +32,10 @@ const interpDelay = (Number(params.get('delay')) || INTERP_DELAY_MS) / 1000;
 
 const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const odFrom = el('od-from'), odTo = el('od-to'), clockEl = el('clock'), parEl = el('par');
-const sWhat = el('s-what'), sTogo = el('s-togo');
 const standingsEl = el('standings'), promptEl = el('prompt');
-const netEl = el('status-net'), nameEl = el<HTMLInputElement>('name');
+const netEl = el('status-net');
+const nameEl = el<HTMLInputElement>('name');
+const joinEl = el<HTMLFormElement>('join');
 const staminaEl = el('stamina'), stamFill = el<HTMLDivElement>('stam-fill');
 const stamLabel = el('stam-label');
 const resultsEl = el('results'), rTitle = el('r-title'), rSub = el('r-sub');
@@ -143,7 +144,17 @@ function grabMouse() {
   const r = renderer.domElement.requestPointerLock() as unknown as Promise<void> | undefined;
   if (r && typeof r.catch === 'function') r.catch(() => {});
 }
-lockEl.addEventListener('click', grabMouse);
+/**
+ * Starting the game is one gesture: name, then mouse. Clicking the card
+ * anywhere works, except on the name box itself — typing your name should not
+ * swallow the cursor.
+ */
+joinEl.addEventListener('submit', (e) => { e.preventDefault(); submitName(); grabMouse(); });
+lockEl.addEventListener('click', (e) => {
+  if (e.target === nameEl) return;
+  submitName();
+  grabMouse();
+});
 renderer.domElement.addEventListener('click', grabMouse);
 
 const held = (...names: string[]) => names.some((n) => keys.has(n));
@@ -207,9 +218,19 @@ const net = connect(serverUrl, {
   },
 });
 
-nameEl.addEventListener('change', () => {
-  if (nameEl.value.trim()) net.send({ type: 'name', name: nameEl.value.trim() });
-});
+/**
+ * The name is asked for on the way in, on the same card that takes the mouse.
+ * It used to be a loose box in the corner of the HUD, which nobody filled in
+ * because nothing ever asked them to.
+ */
+const NAME_KEY = 'transitparty.name';
+try { nameEl.value = localStorage.getItem(NAME_KEY) ?? ''; } catch { /* private mode */ }
+function submitName() {
+  const n = nameEl.value.trim();
+  if (!n) return;
+  net.send({ type: 'name', name: n });
+  try { localStorage.setItem(NAME_KEY, n); } catch { /* private mode */ }
+}
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
@@ -350,6 +371,7 @@ function frame(now: number) {
   // ── camera ──────────────────────────────────────────────────────────────
   camera.position.set(me.x, me.h + PLAYER.eye, me.y);
   camera.rotation.set(pitch, -(facing + Math.PI / 2), 0);
+  scene3d.setViewer(camera.position.x, camera.position.y, camera.position.z);
 
   const people = othersAt(simTime - interpDelay, simTime);
   scene3d.updateVehicles(c, vehicles);
@@ -374,19 +396,19 @@ function frame(now: number) {
   odTo.textContent = dest.name;
   clockEl.textContent = fmt(racing ? curr.round.elapsed : 0);
   parEl.textContent = `par ${fmt(c.par.time)} · ${c.par.transfers} changes`;
-  sTogo.textContent = `${Math.round(Math.hypot(dest.x - me.x, dest.y - me.y))}m to ${dest.name}`;
 
   const aboard = me.riding ? vehicleById(c, me.riding, simTime) : null;
   if (aboard) {
+    // With the status panel gone, the one line at the bottom carries what you
+    // are on as well as what it is about to do.
     const line = c.lines[aboard.line];
-    sWhat.innerHTML = `aboard <span style="color:${line.color}">${line.name}</span>`;
+    const badge = `<span style="color:${line.color}">${line.name}</span>`;
     promptEl.innerHTML = aboard.atStop >= 0
-      ? `<b>${c.stops[aboard.atStop].name}</b> — doors ` +
+      ? `${badge} at <b>${c.stops[aboard.atStop].name}</b> — doors ` +
         `<span style="color:#ffd166">${aboard.doorTime.toFixed(0)}s</span>`
-      : `<span style="opacity:0.7">next stop ${c.stops[aboard.nextStop].name} ` +
-        `in ${aboard.eta.toFixed(0)}s</span>`;
+      : `<span style="opacity:0.75">${badge} — next stop ` +
+        `${c.stops[aboard.nextStop].name} in ${aboard.eta.toFixed(0)}s</span>`;
   } else {
-    sWhat.textContent = me.grounded ? (wish.x || wish.y ? 'on foot' : 'standing') : 'in the air';
     // Anything with its doors open, close enough to run for.
     const near = vehicles
       .filter((v) => v.atStop >= 0 && Math.hypot(v.x - me.x, v.y - me.y) < 26)

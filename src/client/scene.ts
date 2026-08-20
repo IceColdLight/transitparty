@@ -51,8 +51,11 @@ export const FOG_FAR = 720;
  * canvas and against a server-side one — which is what lets tools/shots.ts
  * render the city to a PNG with no browser anywhere.
  */
-export function paintSign(g: CanvasRenderingContext2D, text: string, sub: string[], color: string) {
-  g.fillStyle = '#10151c';
+export function paintSign(
+  g: CanvasRenderingContext2D, text: string, sub: string[], color: string,
+  bg = '#10151c',
+) {
+  g.fillStyle = bg;
   g.fillRect(0, 0, 256, 80);
   g.strokeStyle = color;
   g.lineWidth = 6;
@@ -74,10 +77,10 @@ export function paintSign(g: CanvasRenderingContext2D, text: string, sub: string
 
 export const SIGN_W = 256, SIGN_H = 80;
 
-function browserSign(text: string, sub: string[], color: string): THREE.Texture {
+function browserSign(text: string, sub: string[], color: string, bg?: string): THREE.Texture {
   const c = document.createElement('canvas');
   c.width = SIGN_W; c.height = SIGN_H;
-  paintSign(c.getContext('2d')!, text, sub, color);
+  paintSign(c.getContext('2d')!, text, sub, color, bg);
   const t = new THREE.CanvasTexture(c);
   t.anisotropy = 4;
   return t;
@@ -85,6 +88,8 @@ function browserSign(text: string, sub: string[], color: string): THREE.Texture 
 
 export type Scene3D = {
   scene: THREE.Scene;
+  /** keep the sky centred on whoever is looking; call it every frame */
+  setViewer(x: number, y: number, z: number): void;
   /** call each frame with the current fleet */
   updateVehicles(city: City, vehicles: Vehicle[]): void;
   updatePlayers(players: PlayerState[], selfId: string): void;
@@ -92,7 +97,9 @@ export type Scene3D = {
 };
 
 /** Swappable so a headless renderer can supply textures without a DOM. */
-export type SceneOpts = { sign?: (text: string, sub: string[], color: string) => THREE.Texture };
+export type SceneOpts = {
+  sign?: (text: string, sub: string[], color: string, bg?: string) => THREE.Texture;
+};
 
 export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
   const makeSign = opts.sign ?? browserSign;
@@ -100,9 +107,15 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
   const keepEarly = <T extends THREE.BufferGeometry | THREE.Material>(x: T) => {
     junk.push(x); return x;
   };
+  let skyMesh: THREE.Mesh | null = null;
 
   const scene = new THREE.Scene();
   scene.fog = new THREE.Fog(SKY_LOW, FOG_NEAR, FOG_FAR);
+  /**
+   * A flat fallback behind everything. Belt and braces: if the sky sphere is
+   * ever missed, the result should be a plain blue, never a black hole.
+   */
+  scene.background = new THREE.Color(SKY_LOW);
 
   /**
    * A real sky: a gradient from a pale horizon to a proper blue overhead,
@@ -135,7 +148,19 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
           }`,
       })),
     );
+    /**
+     * The sky FOLLOWS THE VIEWER. Left at the world origin, a sphere of any
+     * radius is eventually somewhere you can walk out of — this city is 3000m
+     * across, so a player near the far corner was standing outside their own
+     * sky and looking at the culled back of it, which renders as a black
+     * circle overhead.
+     *
+     * It also never writes depth and draws first, so it can never occlude
+     * anything however close the geometry gets.
+     */
     sky.renderOrder = -1;
+    sky.frustumCulled = false;
+    skyMesh = sky;
     scene.add(sky);
   }
 
@@ -606,8 +631,14 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
     const plate = (text: string) => {
       let m = plates.get(text);
       if (!m) {
+        /**
+         * Dark blue with a white border, so a street name and a station name
+         * are never mistaken for one another at a glance. They hang at similar
+         * heights on similar poles and both say a place name; the colour is
+         * the only thing doing the telling apart.
+         */
         m = keep(new THREE.MeshBasicMaterial({
-          map: keep(makeSign(text, [], '#9fb3c8')), fog: true,
+          map: keep(makeSign(text, [], '#e8eef6', '#123a7a')), fog: true,
         }));
         plates.set(text, m);
       }
@@ -1003,6 +1034,10 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
 
   return {
     scene,
+
+    setViewer(x, y, z) {
+      if (skyMesh) skyMesh.position.set(x, y, z);
+    },
 
     updateVehicles(_city, vehicles) {
       for (const v of vehicles) {

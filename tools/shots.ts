@@ -87,9 +87,9 @@ const renderer = new THREE.WebGLRenderer({
 renderer.setSize(W, H, false);
 
 /** Station signs, painted on a server-side canvas and handed over as raw pixels. */
-function sign(text: string, sub: string[], color: string): THREE.Texture {
+function sign(text: string, sub: string[], color: string, bg?: string): THREE.Texture {
   const c = createCanvas(SIGN_W, SIGN_H);
-  paintSign(c.getContext('2d') as unknown as CanvasRenderingContext2D, text, sub, color);
+  paintSign(c.getContext('2d') as unknown as CanvasRenderingContext2D, text, sub, color, bg);
   const img = c.getContext('2d').getImageData(0, 0, SIGN_W, SIGN_H);
   const tex = new THREE.DataTexture(new Uint8Array(img.data), SIGN_W, SIGN_H, THREE.RGBAFormat);
   tex.flipY = true;
@@ -113,6 +113,7 @@ built.updatePlayers(people, 'p1');
 function shoot(name: string, x: number, y: number, h: number, look: number, pitch = 0) {
   camera.position.set(x, h + PLAYER.eye, y);
   camera.rotation.set(pitch, -(look + Math.PI / 2), 0);
+  built.setViewer(camera.position.x, camera.position.y, camera.position.z);
   renderer.render(built.scene, camera);
 
   const px = new Uint8Array(W * H * 4);
