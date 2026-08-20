@@ -20,7 +20,8 @@
  * which is a different, worse game.
  */
 import * as THREE from 'three';
-import { BODIES, CITY, PLATFORM } from '../shared/constants.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { BODIES, CITY, PLATFORM, type ModeId } from '../shared/constants.js';
 import { platformAt } from '../shared/streets.js';
 import type { City, PlayerState, Vehicle } from '../shared/types.js';
 
@@ -300,9 +301,16 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
       keep(new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide, fog: true })),
     );
     sign.position.set(back.x, 3.3, back.y);
-    // Face along the street, so it is readable from where you walk up.
+    // Face along the street, so it is readable from where you walk up — and
+    // put a second one back to back with it, because a double-sided plane
+    // shows the far side mirrored and a station called ferhabtpuaH helps
+    // nobody.
     sign.rotation.y = onVertical ? 0 : Math.PI / 2;
     scene.add(sign);
+    const twin = sign.clone();
+    twin.rotation.y += Math.PI;
+    twin.position.set(back.x, 3.3, back.y);
+    scene.add(twin);
   }
 
   // ── where you are going, and where you started ───────────────────────────
@@ -330,64 +338,168 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
   const vehicleMeshes = new Map<string, THREE.Mesh>();
   const lineMats = city.lines.map((l) => keep(new THREE.MeshLambertMaterial({ color: l.color })));
   const glassMat = keep(new THREE.MeshLambertMaterial({ color: 0x16202b }));
+  /**
+   * One merged geometry per mode, built once and shared by every vehicle on
+   * every line of it.
+   *
+   * A vehicle drawn as it should be — floor, wall panels with gaps for the
+   * doors, lintels, glazing, wheels, roof kit — is twenty-odd boxes, and
+   * there are a hundred and seventy vehicles in a city. Merging them into
+   * three geometries (body, dark parts, glass) means three draw calls per
+   * vehicle rather than twenty, and the door gaps are real holes you can see
+   * the inside through.
+   */
+  const parts = (mode: ModeId) => {
+    const b = BODIES[mode];
+    const body: THREE.BufferGeometry[] = [];
+    const dark: THREE.BufferGeometry[] = [];
+    const glass: THREE.BufferGeometry[] = [];
+    const box = (
+      into: THREE.BufferGeometry[], w: number, h: number, d: number,
+      x: number, y: number, z: number,
+    ) => {
+      const g = new THREE.BoxGeometry(w, h, d);
+      g.translate(x, y, z);
+      into.push(g);
+    };
+
+    const closed = mode === 'metro' || mode === 'train';
+    const T = 0.16;                       // panel thickness
+    const doorH = closed ? 2.1 : b.wall;  // a doorway you walk through
+
+    // floor
+    box(dark, b.l, b.deck, b.w, 0, b.deck / 2, 0);
+
+    /** The lengths of wall left between the doorways. */
+    const spans = b.doors
+      .map((d) => [d * b.l - b.doorWidth / 2, d * b.l + b.doorWidth / 2] as const)
+      .sort((p1, p2) => p1[0] - p2[0]);
+    const panels: { c: number; len: number }[] = [];
+    let cut = -b.l / 2;
+    for (const [a, z] of spans) {
+      if (a > cut) panels.push({ c: (cut + a) / 2, len: a - cut });
+      cut = Math.max(cut, z);
+    }
+    if (cut < b.l / 2) panels.push({ c: (cut + b.l / 2) / 2, len: b.l / 2 - cut });
+
+    for (const side of [-1, 1]) {
+      const z = side * (b.w / 2 - T / 2);
+      for (const pn of panels) {
+        box(body, pn.len, b.wall, T, pn.c, b.deck + b.wall / 2, z);
+        // glazing, on the outside of the panel
+        const gy = b.deck + (closed ? 1.5 : 0.72);
+        const gh = closed ? 1.0 : 0.34;
+        if (pn.len > 1) box(glass, pn.len - 0.5, gh, T * 0.6, pn.c, gy, z + side * T * 0.5);
+      }
+      // lintels over the doors, so a doorway is a door and not a slot to the roof
+      if (closed) {
+        for (const d of b.doors) {
+          box(body, b.doorWidth, b.wall - doorH, T, d * b.l, b.deck + doorH + (b.wall - doorH) / 2, z);
+        }
+      }
+      // ends
+      box(body, T, b.wall, b.w, side * (b.l / 2 - T / 2), b.deck + b.wall / 2, 0);
+    }
+
+    /**
+     * A roof for everything, but road vehicles carry theirs on pillars above
+     * waist-high sides — an open-sided tram, which is a real thing and also
+     * the only shape that satisfies both halves of the design: a cabin you are
+     * inside, and a side low enough to vault when your stop goes past.
+     *
+     * Without it a bus was an open-topped box and read, accurately, as a skip.
+     */
+    if (closed) {
+      box(body, b.l, 0.14, b.w, 0, b.deck + b.wall + 0.07, 0);
+    } else {
+      const roofY = b.deck + b.h - 0.07;
+      box(body, b.l, 0.14, b.w, 0, roofY, 0);
+      for (const side of [-1, 1]) {
+        const z = side * (b.w / 2 - T / 2);
+        for (const pn of panels) {
+          for (const end of [-1, 1]) {
+            const px = pn.c + end * (pn.len / 2 - 0.09);
+            box(body, 0.18, b.h - b.wall - 0.14, T, px, b.deck + b.wall + (b.h - b.wall) / 2 - 0.07, z);
+          }
+        }
+      }
+    }
+
+    // benches down both sides, so the inside looks like an inside
+    for (const side of [-1, 1]) {
+      for (const pn of panels) {
+        if (pn.len < 1.4) continue;
+        box(dark, pn.len - 0.4, 0.42, 0.52,
+          pn.c, b.deck + 0.21, side * (b.w / 2 - 0.42));
+      }
+    }
+
+    // running gear, under the floor
+    const axles = mode === 'bus' ? [-0.32, 0.34] : [-0.34, 0.34];
+    for (const a of axles) {
+      for (const side of [-1, 1]) {
+        const wheel = new THREE.CylinderGeometry(b.deck * 0.62, b.deck * 0.62, 0.34, 8);
+        wheel.rotateX(Math.PI / 2);
+        wheel.translate(a * b.l, b.deck * 0.55, side * (b.w / 2 - 0.24));
+        dark.push(wheel);
+      }
+    }
+
+    // roof kit — the quickest way to tell the four apart at a distance
+    const roof = b.deck + (closed ? b.wall + 0.14 : b.h);
+    if (mode === 'tram' || mode === 'train') {
+      // pantograph: a folded arm and the bar that rides the wire
+      box(dark, 1.6, 0.1, 0.12, b.l * 0.22, roof + 0.5, -0.35);
+      box(dark, 1.6, 0.1, 0.12, b.l * 0.22, roof + 0.5, 0.35);
+      box(dark, 0.16, 0.06, b.w * 0.7, b.l * 0.22 + 0.7, roof + 0.95, 0);
+    }
+    if (mode === 'metro') {
+      for (const a of [-0.25, 0, 0.25]) box(dark, b.l * 0.16, 0.34, b.w * 0.55, a * b.l, roof + 0.17, 0);
+    }
+    if (mode === 'train') {
+      // a nose, so the front of a train looks like the front of a train
+      box(body, b.l * 0.06, b.wall * 0.72, b.w * 0.86, b.l * 0.5, b.deck + b.wall * 0.36, 0);
+    }
+    if (mode === 'bus') {
+      // a windscreen, so the front end reads as the front end
+      box(glass, 0.1, b.h - b.wall - 0.4, b.w * 0.88, b.l / 2 - 0.2, b.deck + b.wall + 0.6, 0);
+    }
+    if (mode === 'tram') {
+      // an articulation waist, narrower than the rest of it
+      box(dark, 1.2, b.wall * 0.9, b.w * 1.02, 0, b.deck + b.wall / 2, 0);
+    }
+
+    const merge = (list: THREE.BufferGeometry[]) => {
+      const m = mergeGeometries(list, false)!;
+      list.forEach((g) => g.dispose());
+      return keep(m);
+    };
+    return { body: merge(body), dark: merge(dark), glass: merge(glass) };
+  };
+
+  const shells: Partial<Record<ModeId, ReturnType<typeof parts>>> = {};
+  const darkMat = keep(new THREE.MeshLambertMaterial({ color: 0x24282f }));
+
   for (const line of city.lines) {
     const b = BODIES[line.mode];
-    /**
-     * Road vehicles are OPEN-TOPPED and rail ones are not, and the difference
-     * is the rule made visible. You can step off a bus whenever you like, so
-     * it has waist-high sides you can see over and vault; a metro between
-     * stations keeps hold of you, so it is a closed box. Told, rather than
-     * explained in a tooltip.
-     *
-     * It also fixes riding LOOKING like nothing. A vehicle used to be one
-     * solid box and standing on its deck put the camera inside it, where
-     * backface culling made the whole thing vanish — you travelled at thirty
-     * metres a second with no evidence you were on anything.
-     */
-    const open = line.mode === 'bus' || line.mode === 'tram';
+    if (!shells[line.mode]) shells[line.mode] = parts(line.mode);
+    const shell = shells[line.mode]!;
+    const boardTex = keep(makeSign(line.name, [], line.color));
+
     for (let run = 0; run < line.fleet; run++) {
       const g = new THREE.Group() as unknown as THREE.Mesh;
+      g.add(new THREE.Mesh(shell.body, lineMats[line.id]));
+      g.add(new THREE.Mesh(shell.dark, darkMat));
+      g.add(new THREE.Mesh(shell.glass, glassMat));
 
-      const deck = new THREE.Mesh(
-        keep(new THREE.BoxGeometry(b.l, b.deck, b.w)),
-        keep(new THREE.MeshLambertMaterial({ color: 0x2b313c })),
+      // the line number, on the front, where you read it from the platform
+      const board = new THREE.Mesh(
+        keep(new THREE.PlaneGeometry(b.w * 0.7, b.w * 0.7 * 0.31)),
+        keep(new THREE.MeshBasicMaterial({ map: boardTex })),
       );
-      deck.position.y = b.deck / 2;
-      g.add(deck);
-
-      if (open) {
-        const wall = 1.05, t = 0.22;
-        const side = keep(new THREE.BoxGeometry(b.l, wall, t));
-        const end = keep(new THREE.BoxGeometry(t, wall, b.w));
-        for (const z of [-b.w / 2 + t / 2, b.w / 2 - t / 2]) {
-          const w = new THREE.Mesh(side, lineMats[line.id]);
-          w.position.set(0, b.deck + wall / 2, z);
-          g.add(w);
-        }
-        for (const x of [-b.l / 2 + t / 2, b.l / 2 - t / 2]) {
-          const w = new THREE.Mesh(end, lineMats[line.id]);
-          w.position.set(x, b.deck + wall / 2, 0);
-          g.add(w);
-        }
-        // A cab at the front, so you can tell which way it is going — and
-        // low enough to see over, because standing behind a full-height one
-        // means riding a tram with no idea which stop is coming.
-        const ch = (b.h - b.deck) * 0.55;
-        const cab = new THREE.Mesh(keep(new THREE.BoxGeometry(b.l * 0.2, ch, b.w)), lineMats[line.id]);
-        cab.position.set(b.l * 0.4, b.deck + ch / 2, 0);
-        g.add(cab);
-      } else {
-        const body = new THREE.Mesh(
-          keep(new THREE.BoxGeometry(b.l, b.h - b.deck, b.w)), lineMats[line.id],
-        );
-        body.position.y = b.deck + (b.h - b.deck) / 2;
-        g.add(body);
-        const glass = new THREE.Mesh(
-          keep(new THREE.BoxGeometry(b.l * 0.94, (b.h - b.deck) * 0.34, b.w * 1.02)), glassMat,
-        );
-        glass.position.y = b.deck + (b.h - b.deck) * 0.66;
-        g.add(glass);
-      }
+      board.position.set(b.l / 2 + 0.02, b.deck + b.wall * 0.78, 0);
+      board.rotation.y = Math.PI / 2;
+      g.add(board);
 
       scene.add(g);
       vehicleMeshes.set(`${line.id}.${run}`, g);

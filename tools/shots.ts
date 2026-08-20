@@ -148,6 +148,15 @@ shoot('fp-up', pad.x, pad.y, PLATFORM.height, along, 0.5);
 const rider = vehicles.find((v) => v.atStop < 0 && ['bus', 'tram'].includes(city.lines[v.line].mode));
 if (rider) shoot('fp-riding', rider.x, rider.y, 0.5, rider.angle);
 
+// One portrait of each mode, from the side, ten metres off.
+for (const mode of ['bus', 'tram', 'metro', 'train'] as const) {
+  const v = vehicles.find((x) => city.lines[x.line].mode === mode && x.atStop >= 0)
+    ?? vehicles.find((x) => city.lines[x.line].mode === mode);
+  if (!v) continue;
+  const side = v.angle + Math.PI / 2;
+  shoot(`model-${mode}`, v.x - Math.cos(side) * 17, v.y - Math.sin(side) * 17, 3.4, side, -0.12);
+}
+
 // And the map, on its card, exactly as it is pasted onto the held quad.
 {
   const MW = 1024, MH = 704, PAD = 30;

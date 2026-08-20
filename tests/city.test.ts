@@ -126,6 +126,67 @@ check('every city has at least one bridge',
   cities.every((c) => c.river.bridges.length >= 1),
   `min ${Math.min(...cities.map((c) => c.river.bridges.length))} of ${CITY.bridges}`);
 
+describe('no single half of the network is enough');
+
+/**
+ * The complaint this exists to prevent: "taking the metro is easily the
+ * fastest way to arrive, and the buses are just padding on the map".
+ *
+ * It was true. Rail is fast, runs straight instead of round the block, and
+ * stops rarely, so it won every comparison it was allowed into — and a third
+ * of all stations were on it. Ignoring every bus and tram in the city cost
+ * 47%, which is not enough to make anyone read a map.
+ *
+ * Races now start and finish OFF the rail network, and a race is thrown away
+ * unless BOTH halves of the network are genuinely insufficient alone. The
+ * check has to be symmetric: penalising rail only teaches players to ignore
+ * the metro instead, which is the same shallow map with the modes swapped.
+ */
+const isRailLine = (c: typeof cities[0], l: number) =>
+  c.lines[l].mode === 'metro' || c.lines[l].mode === 'train';
+
+let onRailEnds = 0;
+for (const c of cities) {
+  if (c.stops[c.origin].lines.some((l) => isRailLine(c, l))) onRailEnds++;
+  if (c.stops[c.destination].lines.some((l) => isRailLine(c, l))) onRailEnds++;
+}
+check('races start and finish on the local network, not the trunk',
+  onRailEnds === 0, `${onRailEnds} endpoints sat on a metro or train line`);
+
+const halfOnly = (c: typeof cities[0], rail: boolean) => {
+  const cut = { ...c, stops: c.stops.map((s) => ({
+    ...s, lines: s.lines.filter((l) => isRailLine(c, l) === rail),
+  })) };
+  const r = bestRoute(cut, c.origin, c.destination, walkNeighbours(cut));
+  return r ? r.time : Infinity;
+};
+const railRatio: number[] = [], roadRatio: number[] = [];
+const usesBoth: boolean[] = [];
+for (const c of cities.slice(0, 40)) {
+  railRatio.push(halfOnly(c, true) / c.par.time);
+  roadRatio.push(halfOnly(c, false) / c.par.time);
+  const r = bestRoute(c, c.origin, c.destination, walkNeighbours(c))!;
+  const modes = r.legs.filter((l) => l.kind === 'ride' && l.from !== l.to)
+    .map((l) => c.lines[(l as { line: number }).line].mode);
+  usesBoth.push(modes.some((m) => m === 'metro' || m === 'train')
+    && modes.some((m) => m === 'bus' || m === 'tram'));
+}
+const worst = (a: number[]) => Math.min(...a);
+const finite = (a: number[]) => a.filter((x) => isFinite(x));
+note(`rail alone costs x${avg(finite(railRatio)).toFixed(2)} where it works at all ` +
+  `(impossible in ${railRatio.length - finite(railRatio).length}/${railRatio.length}), ` +
+  `road alone x${avg(finite(roadRatio)).toFixed(2)} ` +
+  `(impossible in ${roadRatio.length - finite(roadRatio).length}/${roadRatio.length})`);
+check('you cannot just take the metro',
+  worst(railRatio) >= RACE.minRailPenalty - 0.001,
+  `cheapest rail-only race is x${worst(railRatio).toFixed(2)}, floor x${RACE.minRailPenalty}`);
+check('and you cannot just take the bus',
+  worst(roadRatio) >= RACE.minRoadPenalty - 0.001,
+  `cheapest road-only race is x${worst(roadRatio).toFixed(2)}, floor x${RACE.minRoadPenalty}`);
+check('so the best route always uses both halves of the network',
+  usesBoth.every(Boolean),
+  `${usesBoth.filter(Boolean).length}/${usesBoth.length} races mix rail and road`);
+
 describe('the modes stay in order');
 
 /**

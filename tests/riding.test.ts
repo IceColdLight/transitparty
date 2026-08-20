@@ -15,7 +15,7 @@
 import { BODIES, PLAYER, WALK } from '../src/shared/constants.js';
 import { buildCity } from '../src/shared/city.js';
 import { type Ground, newBody, stepBody } from '../src/shared/movement.js';
-import { allVehicles, overVehicle, vehicleById } from '../src/shared/vehicles.js';
+import { allVehicles, overVehicle, toWorld, vehicleById } from '../src/shared/vehicles.js';
 import type { City, Vehicle } from '../src/shared/types.js';
 import { check, describe, near, note, report } from './harness.js';
 
@@ -232,6 +232,86 @@ describe('coming down onto a deck from above');
   check('mid-air steering bends the jump without cancelling it',
     fought < free && fought > free * 0.3,
     `${fought.toFixed(0)}m against ${free.toFixed(0)}m`);
+}
+
+describe('doors');
+
+/**
+ * A vehicle is a room with doors, and on foot the doors are the only way
+ * through the walls. That is what turns getting off at the right stop into
+ * something you plan a few seconds ahead rather than a key you press.
+ */
+{
+  const found2 = findDwelling(city, 'bus') ?? findDwelling(city)!;
+  const v = found2.v;
+  const mode = city.lines[v.line].mode;
+  const spec = BODIES[mode];
+  const t = found2.time;
+  const g = groundAt(city, t);
+
+  /** Put a body on the deck and try to walk out sideways from `lx`. */
+  const escapeFrom = (lx: number) => {
+    const at = toWorld(v, lx, 0);
+    const p2 = newBody(at.x, at.y);
+    stepBody(p2, still, STEP, g);
+    if (!p2.riding) return 'never got on';
+    const out = toWorld(v, lx, spec.w);
+    const dx = out.x - p2.x, dy = out.y - p2.y;
+    const len = Math.hypot(dx, dy) || 1;
+    for (let i = 0; i < 60 * 3; i++) {
+      stepBody(p2, { wx: dx / len, wy: dy / len, sprint: false, jump: false }, STEP, g);
+      if (!p2.riding) return 'out';
+    }
+    return 'held';
+  };
+
+  const doorLx = spec.doors[0] * spec.l;
+  // A point on the flank as far from any doorway as this body allows.
+  let wallLx = 0, worst = 0;
+  for (let x = -spec.l / 2; x <= spec.l / 2; x += 0.2) {
+    const gap = Math.min(...spec.doors.map((d) => Math.abs(x - d * spec.l)));
+    if (gap > worst) { worst = gap; wallLx = x; }
+  }
+  note(`${city.lines[v.line].name}: ${spec.doors.length} doors a side, ` +
+    `${spec.doorWidth}m wide, walls ${spec.wall}m`);
+
+  check('you can walk out of a doorway while it is standing at a stop',
+    escapeFrom(doorLx) === 'out', escapeFrom(doorLx));
+  check('and you cannot walk out through the side of the bodywork',
+    escapeFrom(wallLx) === 'held', escapeFrom(wallLx));
+}
+
+/** And a sealed one keeps its doors shut between stations. */
+{
+  const rail = findDwelling(city, 'metro');
+  if (rail) {
+    const spec = BODIES.metro;
+    let t = rail.time;
+    const at = toWorld(rail.v, spec.doors[0] * spec.l, 0);
+    const p2 = newBody(at.x, at.y);
+    stepBody(p2, still, STEP, groundAt(city, t));
+    const boarded = p2.riding;
+    let moving = false;
+    for (let i = 0; i < 60 * 60 && !moving; i++) {
+      t += STEP;
+      stepBody(p2, still, STEP, groundAt(city, t));
+      const v2 = vehicleById(city, p2.riding ?? '', t);
+      if (v2 && v2.atStop < 0) moving = true;
+    }
+    // Stand in the doorway and push, with the jump key down for good measure.
+    for (let i = 0; i < 60 * 3; i++) {
+      t += STEP;
+      const v2 = vehicleById(city, p2.riding ?? '', t);
+      if (!v2) break;
+      const out = toWorld(v2, spec.doors[0] * spec.l, spec.w);
+      const dx = out.x - p2.x, dy = out.y - p2.y;
+      const len = Math.hypot(dx, dy) || 1;
+      stepBody(p2, { wx: dx / len, wy: dy / len, sprint: true, jump: true }, STEP, groundAt(city, t));
+    }
+    check('a doorway you are standing in is still shut between stations',
+      moving && p2.riding === boarded,
+      moving ? `${boarded} kept hold of you` : 'never left a station');
+  }
 }
 
 describe('landing');

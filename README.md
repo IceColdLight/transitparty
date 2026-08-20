@@ -93,14 +93,19 @@ You start on a platform. Somewhere across the city is a **column of gold light**
 you can see over the rooftops — that is where you are going. First one to stand
 under it wins. The green column behind you is where everyone started.
 
-**There is no board button.** A vehicle is a surface. Walk onto its deck and
-you go where it goes; step off and you do not. At a stop it pulls up in the
-middle of the road and you walk out to it — which one you get on is decided by
-which one you walk onto.
+**There is no board button.** A vehicle is a room with doors. Walk in and you
+go where it goes; walk out and you do not. At a stop it pulls up in the middle
+of the road with its doors open, and you have to get to a doorway — the sides
+are solid, so which door you make for is the first decision of every boarding.
 
-**Buses and trams are open-topped, metros and trains are not.** That is not
-decoration: you can step off a bus whenever you like, and a metro keeps hold of
-you until the next station. Look at the vehicle and you know which it is.
+**Getting off is the same problem in reverse.** The doors only open at stops,
+so if you are at the wrong end of the carriage when yours comes up, you spend
+the dwell walking and it leaves with you still on it. Stand near a door.
+
+**Buses and trams have waist-high sides; metros and trains are sealed.** You
+can vault out of a tram at any speed — over the side, no door needed — and a
+metro is taking you to the next station whether you like it or not. One look
+tells you which you are on.
 
 **Jumping off a moving one throws you down the street.** You keep its speed,
 minus a bit of drag, so stepping off a tram at full pelt carries you fifteen
@@ -167,6 +172,13 @@ the city runs at three times real speed and "197 km/h" tells you nothing.
 **The order is guaranteed:** every train line in every city is faster than
 every metro line, every metro faster than every tram, every tram faster than
 every bus. You never have to wonder.
+
+**No single half of the network will get you there.** Every race starts and
+finishes *off* the rail network, and a city is thrown away unless riding only
+metros and trains — or only buses and trams — costs you real time. Measured
+across generated cities, rail-only runs about 1.5× the best route and road-only
+about the same. The trunk gets you across town; the local lines get you to it
+and away from it. You need both, every time.
 
 **Only the train and the metro ignore the street grid** — one is elevated and
 one is underground, and between stations they are drawn faded to say so. Buses

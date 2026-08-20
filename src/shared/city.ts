@@ -567,6 +567,20 @@ export function chooseRace(
    * and with three bridges and four crossings there is a real decision at the
    * top of it.
    */
+  /**
+   * The same network with every bus and tram taken out of it, used to ask how
+   * well a player could do by only ever boarding rail. The walking graph is
+   * unchanged — it depends on the streets, not on the lines — so this costs a
+   * shallow copy and nothing else.
+   */
+  const isRail = (l: number) => net.lines[l].mode === 'metro' || net.lines[l].mode === 'train';
+  const withOnly = (keep: (l: number) => boolean): Net => ({
+    ...net,
+    stops: net.stops.map((s) => ({ ...s, lines: s.lines.filter(keep) })),
+  });
+  const railOnly = withOnly(isRail);
+  const roadOnly = withOnly((l) => !isRail(l));
+
   const crossing = new Set<number>();
   for (const line of net.lines) {
     let seen = 0;
@@ -580,6 +594,9 @@ export function chooseRace(
   for (let k = 0; k < 400; k++) {
     const a = pick(r, starts), b = pick(r, served);
     if (a === b) continue;
+    // Start and finish on the LOCAL network. Rail is a trunk you have to
+    // reach and then leave, which is the entire job of a bus.
+    if (net.stops[a].lines.some(isRail) || net.stops[b].lines.some(isRail)) continue;
     if (bankOf(river, net.stops[a]) === bankOf(river, net.stops[b])) continue;
     if (dist(net.stops[a], net.stops[b]) < diag * 0.42) continue;
 
@@ -609,7 +626,22 @@ export function chooseRace(
       + localEnds
       - Math.abs(route.time - mid) / 130;
 
-    if (!best || score > best.score) {
+    /**
+     * Neither half of the network may be enough on its own.
+     *
+     * Only worth asking about — it costs two more graph searches — if this
+     * candidate would win anyway. The rail half is the one that was breaking
+     * the game, but the check has to be symmetric or the fix just moves the
+     * problem: a race you can win on buses alone teaches you to ignore the
+     * metro, which is the same shallow map with the modes swapped.
+     */
+    if (best && score <= best.score) continue;
+    const rail = bestRoute(railOnly, a, b, nb);
+    if (rail && rail.time < route.time * RACE.minRailPenalty) continue;
+    const road = bestRoute(roadOnly, a, b, nb);
+    if (road && road.time < route.time * RACE.minRoadPenalty) continue;
+
+    {
       best = {
         origin: a, destination: b,
         time: route.time, transfers: route.transfers, walk,

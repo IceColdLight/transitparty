@@ -193,19 +193,44 @@ export const PLATFORM = {
 };
 
 /**
- * Vehicle bodies in metres — length, width, height — and the height of the
- * floor you stand on.
+ * Vehicle bodies, in metres, and they are rooms rather than blocks.
  *
- * The decks are all under PLAYER.step, so you board by walking on during the
- * dwell. The widths are a little over life size: a 2.55m bus is a miserable
- * thing to land on at speed, and the extra half metre is the difference
- * between a stunt that works and one that works sometimes.
+ * Every one has a floor, walls and DOORS, and on foot the doors are the only
+ * way through the walls. That turns getting off at the right stop into
+ * something you plan a few seconds ahead — stand near a door, or spend the
+ * dwell walking to one — which is most of what makes riding interesting
+ * rather than a wait with scenery.
+ *
+ * The decks are all under PLAYER.step, so a doorway is walked through rather
+ * than climbed into. The widths are a little over life size: a 2.55m bus is a
+ * miserable thing to land on at speed, and the extra half metre is the
+ * difference between a stunt that works and one that works sometimes.
  */
-export const BODIES: Record<ModeId, { l: number; w: number; h: number; deck: number }> = {
-  train: { l: 46, w: 4.0, h: 4.0, deck: 0.7 },
-  metro: { l: 34, w: 3.6, h: 3.6, deck: 0.6 },
-  tram: { l: 22, w: 3.2, h: 3.4, deck: 0.5 },
-  bus: { l: 13, w: 3.0, h: 3.2, deck: 0.5 },
+export const BODIES: Record<ModeId, {
+  /** length, width and overall height in metres */
+  l: number;
+  w: number;
+  h: number;
+  /** height of the floor you stand on */
+  deck: number;
+  /**
+   * Height of the side walls above the deck. Under a jump's clearance on a bus
+   * and a tram — you can vault out over the side — and full height on a metro
+   * and a train, where you cannot.
+   */
+  wall: number;
+  /**
+   * Door centres, as a fraction of the length either side of the middle,
+   * mirrored onto both sides so it does not matter which side the platform is
+   * on.
+   */
+  doors: number[];
+  doorWidth: number;
+}> = {
+  train: { l: 46, w: 4.0, h: 4.0, deck: 0.7, wall: 3.3, doors: [-0.38, -0.14, 0.14, 0.38], doorWidth: 1.8 },
+  metro: { l: 34, w: 3.6, h: 3.6, deck: 0.6, wall: 3.0, doors: [-0.36, -0.12, 0.12, 0.36], doorWidth: 1.7 },
+  tram: { l: 22, w: 3.2, h: 3.4, deck: 0.5, wall: 1.05, doors: [-0.34, 0, 0.34], doorWidth: 1.6 },
+  bus: { l: 13, w: 3.0, h: 3.2, deck: 0.5, wall: 1.05, doors: [-0.3, 0.28], doorWidth: 1.5 },
 };
 
 /*
@@ -387,6 +412,39 @@ export const RACE = {
    */
   parMin: 150 / TEMPO,
   parMax: 450 / TEMPO,
+
+  /**
+   * How much slower the race must be if you only ever board a metro or a
+   * train. It is the number that stops the whole game being "find the metro".
+   *
+   * Rail is fast, runs straight instead of round the block, and stops rarely,
+   * so it wins any comparison it is allowed into — and with a third of every
+   * city's stations on the rail network, it was allowed into nearly all of
+   * them. Measured over 50 cities, ignoring every bus and tram cost you 47%:
+   * annoying, and nowhere near enough to make anybody read a map. The road
+   * network was decoration.
+   *
+   * Two rules fix it and both are what a real network looks like rather than
+   * a handicap. Races start and finish OFF the rail network, so the local
+   * lines are how you reach the trunk and how you leave it. And a race is
+   * thrown out unless rail-only genuinely costs you this much. Together they
+   * take rail-only from x1.47 to x1.94 of the best route, and the share of
+   * races where rail alone comes within 15% of it from a third to none — at
+   * no cost in cities: still 50 out of 50 on the first pass.
+   */
+  minRailPenalty: 1.25,
+
+  /**
+   * And the same in the other direction. Penalising rail alone without
+   * penalising road alone just swaps which mode you can safely ignore, and
+   * "always take the bus" is exactly as shallow a map as "always take the
+   * metro" — it is simply slower.
+   *
+   * Lower than the rail figure on purpose. Buses go everywhere, so a
+   * road-only route almost always EXISTS; it is just slow. Demanding as big a
+   * penalty from it as from rail throws away most of the good races.
+   */
+  minRoadPenalty: 1.18,
 };
 
 /** Player colours, in join order. */

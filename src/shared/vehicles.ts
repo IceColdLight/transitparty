@@ -18,7 +18,7 @@
  * therefore get a double dwell, which is the turnaround, and which is why a
  * terminus is the one place you can reliably catch something you just missed.
  */
-import { BODIES, TEMPO } from './constants.js';
+import { BODIES, TEMPO, type ModeId } from './constants.js';
 import type { City, Line, Vehicle } from './types.js';
 
 /** Seconds into this vehicle's cycle. */
@@ -137,17 +137,40 @@ export function departures(city: City, stopId: number, time: number, horizon = 6
   return out.sort((a, b) => a.in - b.in);
 }
 
+/** A world point in the vehicle's own frame: +lx towards the front, +ly to one side. */
+export function toLocal(v: Vehicle, x: number, y: number): { lx: number; ly: number } {
+  const dx = x - v.x, dy = y - v.y;
+  const c = Math.cos(-v.angle), s = Math.sin(-v.angle);
+  return { lx: dx * c - dy * s, ly: dx * s + dy * c };
+}
+
+/** And back again. */
+export function toWorld(v: Vehicle, lx: number, ly: number): { x: number; y: number } {
+  const c = Math.cos(v.angle), s = Math.sin(v.angle);
+  return { x: v.x + lx * c - ly * s, y: v.y + lx * s + ly * c };
+}
+
 /**
  * Is this point inside the vehicle's floor plan? A rotated rectangle test —
  * cheap, and the only shape a vehicle needs to be for standing on.
  */
 export function overVehicle(city: City, v: Vehicle, x: number, y: number, slack = 0): boolean {
   const b = BODIES[city.lines[v.line].mode];
-  const dx = x - v.x, dy = y - v.y;
-  const c = Math.cos(-v.angle), s = Math.sin(-v.angle);
-  const lx = dx * c - dy * s, ly = dx * s + dy * c;
+  const { lx, ly } = toLocal(v, x, y);
   return Math.abs(lx) <= b.l / 2 + slack && Math.abs(ly) <= b.w / 2 + slack;
 }
+
+/** Is this position along the vehicle opposite a doorway? */
+export function inDoorway(mode: ModeId, lx: number): boolean {
+  const b = BODIES[mode];
+  for (const d of b.doors) {
+    if (Math.abs(lx - d * b.l) <= b.doorWidth / 2) return true;
+  }
+  return false;
+}
+
+/** The doors are open exactly while it is standing at a stop. */
+export const doorsOpen = (v: Vehicle) => v.atStop >= 0;
 
 /**
  * The floor under a pair of feet: the highest vehicle deck they are standing

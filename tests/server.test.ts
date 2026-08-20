@@ -18,7 +18,8 @@ import { fileURLToPath } from 'node:url';
 import { WALK } from '../src/shared/constants.js';
 import { platformAt } from '../src/shared/streets.js';
 import { buildCity } from '../src/shared/city.js';
-import { allVehicles } from '../src/shared/vehicles.js';
+import { allVehicles, toWorld } from '../src/shared/vehicles.js';
+import { BODIES } from '../src/shared/constants.js';
 import type { S2CMessage, WorldState } from '../src/shared/types.js';
 import { check, describe, note, report } from './harness.js';
 
@@ -101,32 +102,26 @@ async function main() {
   describe('walking');
 
   /**
-   * Walk ALONG the street the origin sits on. An earlier version always
-   * walked east and failed on any seed where east was a building or the
-   * river — which read as "the server dropped my input" and was nothing of
-   * the kind.
+   * Try each direction in turn and take the best.
+   *
+   * Committing to one and asserting on it was flaky, and for a real reason:
+   * bodywork is solid now, so whichever way you set off there might be a bus
+   * parked in it. What is being tested is that walk input reaches the server
+   * and moves the player — not that any particular compass bearing is clear.
    */
-  const onVertical = city.streets.xs.some((x) => Math.abs(x - origin.x) <= city.streets.width / 2);
-  const dirX = onVertical ? 0 : 1, dirY = onVertical ? 1 : 0;
-  note(`origin sits on a ${onVertical ? 'north-south' : 'east-west'} street`);
-
-  const before = { x: me(a).x, y: me(a).y };
-  a.send({ type: 'walk', seq: 0, wx: dirX, wy: dirY, facing: 0, sprint: false, jump: false });
-  await sleep(1200);
-  a.send({ type: 'walk', seq: 0, wx: 0, wy: 0, facing: 0, sprint: false, jump: false });
-  await sleep(200);
-  const moved = Math.hypot(me(a).x - before.x, me(a).y - before.y);
-  /**
-   * Only a lower bound, and it checks you are still on your own two feet.
-   * The upper bound used to be there too and it failed at random: the streets
-   * have traffic on them, anything standing over a deck is lifted onto it, and
-   * a bus coming through the junction picks you up mid-test and carries you
-   * fifteen metres. That is the game working.
-   */
+  let best = 0;
+  for (const [wx, wy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+    const before = { x: me(a).x, y: me(a).y };
+    a.send({ type: 'walk', seq: 0, wx, wy, facing: 0, sprint: false, jump: false });
+    await sleep(700);
+    a.send({ type: 'walk', seq: 0, wx: 0, wy: 0, facing: 0, sprint: false, jump: false });
+    await sleep(150);
+    best = Math.max(best, Math.hypot(me(a).x - before.x, me(a).y - before.y));
+  }
   check('walk input reaches the server and moves you',
-    moved > WALK.speed * 0.35,
-    `${moved.toFixed(1)}m in ~1.2s at ${WALK.speed.toFixed(1)} m/s` +
-    (me(a).riding ? ' — and then picked up by traffic, which counts' : ''));
+    best > WALK.speed * 0.5,
+    `best of four directions: ${best.toFixed(1)}m in ~0.7s at ${WALK.speed.toFixed(1)} m/s`);
+
   check('and it does not move anybody else',
     Math.hypot(me(b).x - pad.x, me(b).y - pad.y) < 8, 'b stayed put');
 
@@ -168,10 +163,29 @@ async function main() {
    * four-second dwell. Aim for a fixed point instead of pushing in a
    * direction.
    */
+  /**
+   * Head for the nearest DOORWAY, not for the middle of the vehicle.
+   *
+   * The bodywork is solid: walking at the side of a bus now walks you into the
+   * side of a bus. Which door you make for is the first real decision of a
+   * boarding, and an earlier version of this loop that aimed at the centre
+   * simply stood in the road with its face against the panelling.
+   */
+  const doorTarget = (v: ReturnType<typeof allVehicles>[number]) => {
+    const spec = BODIES[city.lines[v.line].mode];
+    let best = { x: v.x, y: v.y }, bd = Infinity;
+    for (const d of spec.doors) {
+      const w = toWorld(v, d * spec.l, 0);
+      const dist = Math.hypot(w.x - me(b).x, w.y - me(b).y);
+      if (dist < bd) { bd = dist; best = w; }
+    }
+    return best;
+  };
+
   let boarded = false;
   for (let i = 0; i < 900 && !boarded; i++) {
-    const here = allVehicles(city, b.state!.time).some((v) => v.atStop === city.origin);
-    if (here) headFor(origin.x, origin.y); else headFor(pad.x, pad.y);
+    const here = allVehicles(city, b.state!.time).find((v) => v.atStop === city.origin);
+    if (here) { const d = doorTarget(here); headFor(d.x, d.y); } else headFor(pad.x, pad.y);
     await sleep(50);
     // Stop the INSTANT you are aboard. A deck is three metres wide and you
     // cross two of them in the time it takes to notice.

@@ -11,10 +11,12 @@
  * one, get on before the doors shut, get off before it carries you past — is
  * the same question as "am I standing on it", asked at speed.
  */
-import { CITY, PLAYER, STAMINA, WALK } from './constants.js';
+import { BODIES, CITY, PLAYER, STAMINA, WALK } from './constants.js';
 import { type River, illegalCrossing } from './river.js';
 import { type Streets, onStreet, snapToStreet } from './streets.js';
-import { deckUnder, overVehicle, vehicleById, vehicleVelocity } from './vehicles.js';
+import {
+  deckUnder, doorsOpen, inDoorway, overVehicle, toLocal, toWorld, vehicleById, vehicleVelocity,
+} from './vehicles.js';
 import type { City, Vehicle } from './types.js';
 
 export type Body = {
@@ -56,13 +58,34 @@ export const newBody = (x: number, y: number): Body => ({
 });
 
 /**
- * A rail vehicle between stations has its doors shut. A bus is an open deck
- * and never does — which is the whole difference between the two modes to
- * play, and the reason the parkour lives on the road.
+ * Everything about being inside a vehicle, in one place.
+ *
+ * A vehicle is a room. Walls hold you in, doorways are the only way through
+ * them on foot, and the doors are open exactly while it is standing at a stop.
+ * On a bus or a tram the walls are waist high, so a jump clears them and you
+ * can bail out anywhere; on a metro or a train they go to the roof and you
+ * are going to the next station whether you like it or not.
  */
-function enclosed(city: City, v: Vehicle): boolean {
-  const mode = city.lines[v.line].mode;
-  return (mode === 'metro' || mode === 'train') && v.atStop < 0;
+function cabin(city: City, v: Vehicle) {
+  const b = BODIES[city.lines[v.line].mode];
+  return {
+    b,
+    mode: city.lines[v.line].mode,
+    halfL: b.l / 2 - PLAYER.radius,
+    halfW: b.w / 2 - PLAYER.radius,
+    /** waist-high sides can be jumped; full-height ones cannot */
+    vaultable: b.wall < 1.4,
+    open: doorsOpen(v),
+  };
+}
+
+/** Can somebody at this height and position pass through the side of the body? */
+function throughSide(
+  city: City, v: Vehicle, lx: number, aboveDeck: number,
+): boolean {
+  const c = cabin(city, v);
+  if (c.vaultable && aboveDeck >= c.b.wall - 0.02) return true;
+  return c.open && inDoorway(c.mode, lx);
 }
 
 export function stepBody(p: Body, input: MoveInput, dt: number, g: Ground): void {
@@ -77,6 +100,7 @@ export function stepBody(p: Body, input: MoveInput, dt: number, g: Ground): void
   const speed = p.sprinting ? WALK.speed * WALK.sprint : WALK.speed;
 
   const t = g.transit;
+  const t2City = t?.city;
   const velOf = (id: string) => (t ? vehicleVelocity(t.city, id, t.time, dt) : { x: 0, y: 0 });
 
   // ── carried. The deck moves under you, so you move with it. This is done
@@ -131,19 +155,18 @@ export function stepBody(p: Body, input: MoveInput, dt: number, g: Ground): void
   }
 
   /**
-   * Shut in? Then the jump key does nothing.
+   * Shut in under a roof? Then the jump key does nothing.
    *
-   * This was a bug with teeth. The enclosure only blocked horizontal movement,
-   * so you could not WALK out of a moving metro but you could jump straight up
-   * out of it, because jumping clears `riding` unconditionally. That drops a
-   * player into the middle of a solid block at sixty metres a second, which
-   * has no sensible answer — and it made the one rule separating rail from
-   * road modes optional.
+   * Not just politeness about headroom: jumping clears `riding`, and inside a
+   * sealed metro that would drop a player through the floor and into the
+   * middle of a solid block at sixty metres a second, which has no sensible
+   * answer. On an open-topped bus or tram jumping is exactly how you get out,
+   * so it stays.
    */
   const shutIn = (() => {
     if (!p.riding || !t) return false;
     const v = vehicleById(t.city, p.riding, t.time);
-    return !!v && enclosed(t.city, v);
+    return !!v && !cabin(t.city, v).vaultable;
   })();
 
   // ── jumping. Leaving a deck turns your relative speed into a real one,
@@ -163,19 +186,68 @@ export function stepBody(p: Body, input: MoveInput, dt: number, g: Ground): void
   let ny = p.y + p.vy * dt;
 
   if (p.riding && t) {
+    /**
+     * Inside the cabin. Rather than refusing the move, the position is
+     * CLAMPED to the walls in the vehicle's own frame, so walking into the
+     * side slides you along it towards a doorway instead of stopping you
+     * dead — which is what you are trying to do anyway when your stop is
+     * coming up.
+     */
     const v = vehicleById(t.city, p.riding, t.time);
-    // Underground and moving: the doors are shut, so you stay inside. It is
-    // also the only thing standing between a player and a jump into the
-    // middle of a solid block, which has no sensible answer.
-    if (v && enclosed(t.city, v) && !overVehicle(t.city, v, nx, ny, -PLAYER.radius)) {
-      nx = p.x; ny = p.y;
-      p.vx = 0; p.vy = 0;
+    if (v) {
+      const c = cabin(t.city, v);
+      const L = toLocal(v, nx, ny);
+      const aboveDeck = p.h - c.b.deck;
+      let { lx, ly } = L;
+      if (Math.abs(lx) > c.halfL && !(c.vaultable && aboveDeck >= c.b.wall - 0.02)) {
+        lx = Math.sign(lx) * c.halfL;
+        p.vx = 0;
+      }
+      if (Math.abs(ly) > c.halfW && !throughSide(t.city, v, lx, aboveDeck)) {
+        ly = Math.sign(ly) * c.halfW;
+        p.vy = 0;
+      }
+      if (lx !== L.lx || ly !== L.ly) {
+        const w = toWorld(v, lx, ly);
+        nx = w.x; ny = w.y;
+      }
     }
   } else {
-    // On foot: streets only, and never across open water.
+    /**
+     * Bodywork is solid from outside too.
+     *
+     * Without this the doors are decoration: a vehicle is not an obstacle to
+     * anyone standing in the road, so you walk straight through the side of a
+     * parked tram, end up in the middle of the floor plan, and are quietly
+     * lifted onto the deck. Every rule about doorways applies to getting in as
+     * well as getting out, and it takes making the sides real to enforce it.
+     *
+     * A move only counts as blocked if it takes you from outside a body to
+     * inside one. Anything that is already inside — because a bus drove onto
+     * it — has to be able to walk back out.
+     */
+    const insideBody = (v: Vehicle, x: number, y: number) => {
+      if (Math.abs(v.x - x) > 26 || Math.abs(v.y - y) > 26) return false;
+      return overVehicle(t2City!, v, x, y);
+    };
+    const barred = (x: number, y: number) => {
+      if (!t) return false;
+      for (const v of t.vehicles) {
+        if (!insideBody(v, x, y)) continue;
+        if (insideBody(v, from.x, from.y)) continue;   // already in it; let them out
+        const c = cabin(t.city, v);
+        if (c.vaultable && p.h - c.b.deck >= c.b.wall - 0.02) continue;   // over the side
+        if (c.open && inDoorway(c.mode, toLocal(v, x, y).lx)) continue;   // through the door
+        return true;
+      }
+      return false;
+    };
+
+    // On foot: streets only, never across open water, and not through a bus.
     const clear = (x: number, y: number) =>
       onStreet(g.streets, { x, y })
-      && !illegalCrossing(g.river, from, { x, y }, CITY.bridgeRadius);
+      && !illegalCrossing(g.river, from, { x, y }, CITY.bridgeRadius)
+      && !barred(x, y);
     if (!onStreet(g.streets, from)) {
       // Off the grid somehow. Walk back on rather than being stuck forever,
       // which is the one failure a player can neither diagnose nor escape.
@@ -213,9 +285,28 @@ export function stepBody(p: Body, input: MoveInput, dt: number, g: Ground): void
    * allowance hid it.
    */
   const reach = p.grounded ? PLAYER.step : 0;
-  const deck = t
+  let deck = t
     ? deckUnder(t.city, t.vehicles, p.x, p.y, Math.max(wasAt, p.h), reach, p.riding)
     : null;
+
+  /**
+   * You cannot arrive on a deck through the side of the bodywork.
+   *
+   * Without this, walking past a stationary tram lifts you straight through
+   * its wall and onto the floor, because gaining a deck is decided by the
+   * floor plan and the floor plan does not know about walls. Getting IN has
+   * to obey the same rules as getting out: through an open doorway, or over
+   * the side if the side is low enough to clear.
+   */
+  if (deck && t && deck.vehicle.id !== p.riding) {
+    const c = cabin(t.city, deck.vehicle);
+    const L = toLocal(deck.vehicle, p.x, p.y);
+    const inside = Math.abs(L.ly) <= c.halfW && Math.abs(L.lx) <= c.halfL;
+    const overTheTop = c.vaultable && Math.max(wasAt, p.h) - c.b.deck >= c.b.wall - 0.02;
+    const throughDoor = c.open && inDoorway(c.mode, L.lx);
+    if (!inside && !overTheTop && !throughDoor) deck = null;
+  }
+
   const floor = deck ? deck.height : 0;
   const landing = deck ? deck.vehicle.id : null;
 

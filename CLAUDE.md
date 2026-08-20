@@ -82,6 +82,42 @@ here, that the verb set was fixed.
 
 ---
 
+## Neither half of the network may be enough
+
+The complaint that forced this: *"taking the metro or the S-Bahn is easily the
+fastest way to arrive; the buses are generally just padding on the map."*
+
+It was true, and the measurements said so. A third of every city's stations sat
+on the rail network, rail runs straight while road routes staircase around
+blocks, and it stops rarely — so it won every comparison it was allowed into.
+**Ignoring every bus and tram in the city cost 47%**, and it came within 15% of
+the best route in a third of all races. "Find the metro" was a reliable
+strategy, which made reading the map optional, which made the map pointless.
+
+Two rules fix it, and both are what a real network looks like rather than a
+handicap:
+
+- **Races start and finish OFF the rail network.** The local lines are how you
+  reach the trunk and how you leave it, which is the actual job of a bus.
+- **A race is thrown away unless BOTH halves are genuinely insufficient
+  alone** — rail-only must cost at least `RACE.minRailPenalty`, road-only at
+  least `RACE.minRoadPenalty`.
+
+The symmetry is not decoration. Penalising rail alone just moves the problem:
+"always take the bus" is exactly as shallow a map as "always take the metro",
+only slower. The road figure is the lower of the two on purpose, because buses
+go everywhere so a road-only route nearly always EXISTS — demanding as much of
+it throws away most of the good races.
+
+Result: rail-only goes from x1.47 to about x1.5 with **no race within 15% of
+the best route**, road-only likewise, and every generated race's best route now
+uses both halves. Cities still generate on the first or second attempt.
+
+`tests/city.test.ts` holds all of it, including the strongest form: the optimal
+route mixes rail and road in every city.
+
+---
+
 ## Riding is a surface, not a state
 
 There is no board key, no boarding rule and no `riding` transition anywhere. A
@@ -100,15 +136,23 @@ Converting between the two at the moment your feet leave or land is exactly
 what makes stepping off throw you down the street instead of dropping you where
 you stood — and getting the conversion wrong is silent in both directions.
 
-Three rules sit on top of it:
+Four rules sit on top of it:
 
-- **A deck is below `PLAYER.step`**, so boarding at a stop is walking on rather
-  than a platforming challenge. Jumping OFF is where the skill lives.
-- **Road vehicles are open-topped and rail ones are enclosed.** You may leave a
-  bus whenever you like; a metro keeps hold of you until the next station. The
-  geometry says which is which without a word of UI, and it is also the only
-  thing standing between a player and a jump into the middle of a solid block,
-  which has no sensible answer.
+- **A vehicle is a room with doors**, and on foot the doors are the only way
+  through the walls. They are open exactly while it is standing at a stop. That
+  one fact turns getting off at the right place into something you plan a few
+  seconds ahead — be near a door, or spend the dwell walking to one and watch
+  your stop go past.
+- **The bodywork is solid from OUTSIDE too.** This is easy to forget and it
+  makes the doors decoration when you do: a vehicle that is not an obstacle to
+  a pedestrian lets you walk through the side of a parked tram, land in the
+  middle of the floor plan, and get quietly lifted onto the deck. Every rule
+  about doorways has to apply to getting in as well as getting out.
+- **Road vehicles have waist-high sides; rail ones are sealed to the roof.**
+  You may vault out of a tram at any speed; a metro keeps hold of you until the
+  next station. The geometry says which without a word of UI, and it is also
+  the only thing standing between a player and a jump into the middle of a
+  solid block, which has no sensible answer.
 - **You stay on what you are already standing on.** Vehicles do not avoid each
   other, so two lines calling at one stop routinely overlap; picking the
   highest deck instead handed the player from the bus they chose to whichever
@@ -436,6 +480,9 @@ consequences of other numbers rather than matters of taste:
 | `PLAYER.step` 0.75 | above every vehicle deck, on purpose: boarding is walking on, not platforming |
 | `PLAYER.airAccel` / `airDrag` | how much of a moving deck's speed survives a jump. Raise the first much and the momentum stops mattering; that bug shipped once already |
 | `BODIES.*.deck` | must stay under `PLAYER.step`, or that mode becomes unboardable without a running jump |
+| `BODIES.*.wall` | the whole rail/road distinction. Under a jump's clearance means "you can leave whenever you like"; above it means "you are going to the next station" |
+| `BODIES.*.doors` | how much of the dwell you spend walking to an exit. Fewer or narrower is a harder game, not a slower one |
+| `RACE.minRail/RoadPenalty` | see "neither half of the network"; drop either and that half of the map becomes padding |
 | `PLATFORM.offset` 5 | wider than the widest vehicle's half-width by a clear margin, or waiting at a stop means being scooped up by whatever arrives first |
 | `streets.width` 26 | also the tolerance for "is this leg on a street", so the generator's grid check and the player's collision agree by construction |
 
