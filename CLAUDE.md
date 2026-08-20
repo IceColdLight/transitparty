@@ -113,6 +113,38 @@ every right not to have moved yet.
 
 ---
 
+## The modes have to be guessable
+
+A player must always be able to answer "is the S faster than the M" without
+measuring anything. Cruise speed does not settle it: what you actually travel
+at is set as much by how often the thing stops, and a train squeezed into
+cramped stops by interchange merges came out slower than a good metro in about
+**0.1% of line pairs** — rare enough never to notice, often enough to make the
+whole hierarchy un-guessable.
+
+`MODES.effMin/effMax` are non-overlapping bands on end-to-end speed, dwells
+included, and `addLine` throws away and redraws any corridor that misses its
+own band. The ordering is now true by construction: **0 inversions in 907,200
+line pairs**. It cost nothing — every city still gets all 18 lines and still
+generates on the first attempt.
+
+Two things follow that are easy to get wrong later:
+
+- **Rejecting a line has to rewind the stops it placed.** `addLine` creates
+  stations as it goes, and a rejected line used to leave them behind with
+  nothing calling at them. That was already a latent leak on the "fewer than
+  three stops" path; adding a second rejection reason would have made it
+  common. Stop ids are indices and nothing references the new ones until the
+  line is committed, so `stops.length = mark` is enough.
+- **Door to door is NOT ordered, on purpose.** You wait over two minutes for a
+  train, so it loses to the metro over 800m and wins over 2500m. That trade is
+  the reason there are four modes rather than a speed slider — but it is only
+  fair if the player can see the frequency, which is why the map legend prints
+  it next to the speed. `tests/city.test.ts` checks the crossover still sits
+  between those two distances.
+
+---
+
 ## The map lies, on purpose
 
 The schematic on TAB is a diagram, not a map: a radial power curve enlarges the
@@ -142,11 +174,43 @@ consequences of other numbers rather than matters of taste:
 | `RACE.minTransfers` 2 | see "ask for the property" above |
 | `line.headway` | *derived*, not the mode's target. The fleet is a whole number, so the real headway is `cycle / fleet`. Take the target literally and you get a remainder, which plays as one long unexplainable gap every cycle |
 | `MODES.*.spacing` | what really separates the modes. It is the reason a bus is never far away and a train always is |
+| `MODES.*.effMin/Max` | non-overlapping by construction — see "the modes have to be guessable". Widen one until it touches its neighbour and the hierarchy silently stops being true |
 
 `tests/city.test.ts` holds the race criteria; `tests/race.test.ts` rides the
 planned route against the real timetable and checks it can be followed at all.
 That one is the closest thing to a playtest in the repo — if the numbers drift,
 it is the suite that will notice first.
+
+---
+
+## Looking at it
+
+`npm run shots` renders `world.ts` and `map.ts` into PNGs with no browser —
+both only touch the standard Canvas2D API, so a server-side canvas draws them
+exactly as the real one does. It is not a test; it renders and you look.
+
+It earned its place immediately. The first time it was pointed at the network
+map it found five things that were invisible from the code and obvious in the
+picture:
+
+- the **legend was underneath the status panel** — the one thing explaining
+  what a coloured line meant was the one thing you could not see. HUD panels
+  that collide with it now fade out while the map is held
+- the **A and B badges were under the player pips** standing on them, every
+  round, at the start and at the end. They are rings with the letter hung off
+  one shoulder now, and they are drawn last
+- the **river read as another tram line** — eleven pixels of solid teal on a
+  diagram whose whole job is telling coloured lines apart. Wide, dim and blue
+  is unmistakably terrain
+- the **bus's seven line badges ran straight through "24 km/h · every 0:41"**,
+  which is the exact number the legend exists to show
+- **labels were being overdrawn by whatever moved past them.** Station names
+  now go on last in both views, and a dwelling vehicle puts its line number
+  BELOW itself, because above is where the station's own name lives
+
+The lesson is not any of those five. It is that none of them would ever have
+shown up in a test, a typecheck or a build, and all five were the first thing
+you saw in the picture.
 
 ---
 

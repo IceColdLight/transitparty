@@ -48,6 +48,18 @@ const resultsEl = el('results'), rTitle = el('r-title'), rSub = el('r-sub');
 const rRows = el('r-rows'), rNext = el('r-next');
 const mapHintEl = el('maphint');
 
+/**
+ * HUD panels that get out of the way while the map is up. The legend lives in
+ * the map's top-left corner and the status panel sat directly on top of it,
+ * which meant the one thing explaining what a coloured line MEANT was the one
+ * thing you could not see.
+ *
+ * Deliberately not everything: the race header (where you are going), the
+ * departure board (what is leaving from under your feet) and the standings are
+ * exactly what you want while planning, and all three sit clear of the legend.
+ */
+const dimUnderMap = [el('status'), el('hint'), nameEl];
+
 let selfId = '';
 let city: City | null = null;
 let citySeed = -1;
@@ -188,6 +200,7 @@ function frame(now: number) {
   mapAlpha += (wantMap - mapAlpha) * Math.min(1, dt * 14);
   drawMap(ctx, c, view, vehicles, people, selfId, mapAlpha);
   mapHintEl.style.opacity = mapAlpha > 0.05 ? '0' : '1';
+  for (const panel of dimUnderMap) panel.style.opacity = String(1 - mapAlpha);
 
   // ── HUD ─────────────────────────────────────────────────────────────────
   const origin = c.stops[c.origin], dest = c.stops[c.destination];

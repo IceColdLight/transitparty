@@ -94,6 +94,24 @@ export type ModeId = 'train' | 'metro' | 'tram' | 'bus';
 export const MODES: Record<ModeId, {
   /** cruise speed, m/s */
   speed: number;
+  /**
+   * The band a finished line's IN-VEHICLE speed must land in, m/s — end to end
+   * distance over end to end time, dwells included. A line outside its band is
+   * thrown away and the corridor redrawn.
+   *
+   * This exists so the modes are PREDICTABLE. Cruise speed alone does not
+   * order them: what you actually travel at is set as much by how often the
+   * thing stops, and a train squeezed into cramped stops by interchange merges
+   * could come out slower than a good metro. Measured over 60 cities that
+   * happened in 0.1% of train/metro line pairs — rare enough never to notice
+   * and often enough to make "is the S faster than the M" un-guessable, which
+   * is the one question the player must always be able to answer.
+   *
+   * The bands do not overlap, so the ordering is now true by construction:
+   * bus < tram < metro < train, on every line, in every city.
+   */
+  effMin: number;
+  effMax: number;
   /** seconds standing at each stop with the doors open — your window to run */
   dwell: number;
   /** target seconds between vehicles */
@@ -107,13 +125,13 @@ export const MODES: Record<ModeId, {
   label: string;
 }> = {
   train: { speed: 34, dwell: 14, headway: 140, spacing: 950, width: 13, prefix: 'S', label: 'train',
-    colors: ['#8f6ec4', '#6f7fd0'] },
+    effMin: 17.5, effMax: 26, colors: ['#8f6ec4', '#6f7fd0'] },
   metro: { speed: 19, dwell: 9, headway: 75, spacing: 540, width: 11, prefix: 'M', label: 'metro',
-    colors: ['#e2574c', '#e08a33', '#d9508c', '#4aa3df'] },
+    effMin: 11.5, effMax: 16.5, colors: ['#e2574c', '#e08a33', '#d9508c', '#4aa3df'] },
   tram:  { speed: 11, dwell: 6, headway: 52, spacing: 300, width: 8, prefix: 'T', label: 'tram',
-    colors: ['#2fa36b', '#3f9d9d', '#77a832', '#3f8f5c'] },
+    effMin: 7.6, effMax: 10.5, colors: ['#2fa36b', '#3f9d9d', '#77a832', '#3f8f5c'] },
   bus:   { speed: 8,  dwell: 5, headway: 42, spacing: 195, width: 6, prefix: 'B', label: 'bus',
-    colors: ['#c9a227', '#b8863b', '#a89a3a'] },
+    effMin: 5.2, effMax: 7.2, colors: ['#c9a227', '#b8863b', '#a89a3a'] },
 };
 
 /** How many lines of each mode the generator lays down. */

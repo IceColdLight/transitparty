@@ -6,7 +6,7 @@
  * it is the whole difficulty of this prototype, and the numbers below are the
  * ones that moved while it was being tuned.
  */
-import { CITY, RACE, WALK } from '../src/shared/constants.js';
+import { CITY, MODES, RACE, WALK, type ModeId } from '../src/shared/constants.js';
 import { buildCity } from '../src/shared/city.js';
 import { bestRoute, walkNeighbours } from '../src/shared/routing.js';
 import { bankOf } from '../src/shared/river.js';
@@ -107,6 +107,71 @@ check('but at least one does, or a bank is stranded',
 check('every city has at least one bridge',
   cities.every((c) => c.river.bridges.length >= 1),
   `min ${Math.min(...cities.map((c) => c.river.bridges.length))} of ${CITY.bridges}`);
+
+describe('the modes stay in order');
+
+/**
+ * The one question a player must always be able to answer without measuring:
+ * is the S faster than the M? Cruise speed does not settle it — what you
+ * actually travel at is set as much by how often the thing stops, and a train
+ * squeezed into cramped stops by interchange merges used to come out slower
+ * than a good metro in about 0.1% of line pairs. Rare enough never to notice,
+ * often enough to make the modes un-guessable.
+ *
+ * MODES.effMin/effMax are non-overlapping bands and the generator redraws any
+ * line that misses its own, so the ordering is true by construction. This is
+ * the check that says so.
+ */
+const ORDER: ModeId[] = ['bus', 'tram', 'metro', 'train'];
+const speeds: Record<string, number[]> = { train: [], metro: [], tram: [], bus: [] };
+for (const c of cities) {
+  for (const l of c.lines) {
+    let span = 0;
+    for (let i = 0; i + 1 < l.stops.length; i++) {
+      span += Math.hypot(c.stops[l.stops[i]].x - c.stops[l.stops[i + 1]].x,
+        c.stops[l.stops[i]].y - c.stops[l.stops[i + 1]].y);
+    }
+    speeds[l.mode].push(span / (l.oneWay - l.dwell));
+  }
+}
+for (const m of ORDER) {
+  note(`${m.padEnd(5)} ${speeds[m].length} lines, ` +
+    `${Math.min(...speeds[m]).toFixed(1)}–${Math.max(...speeds[m]).toFixed(1)} m/s ` +
+    `(band ${MODES[m].effMin}–${MODES[m].effMax})`);
+}
+check('every line travels at a speed its own mode admits to',
+  ORDER.every((m) => speeds[m].every((v) => v >= MODES[m].effMin && v <= MODES[m].effMax)),
+  'all lines inside their band');
+
+let inversions = 0, pairs = 0;
+for (let i = 1; i < ORDER.length; i++) {
+  const slower = speeds[ORDER[i - 1]], faster = speeds[ORDER[i]];
+  for (const a of slower) for (const b of faster) { pairs++; if (a >= b) inversions++; }
+}
+check('a faster mode is faster than a slower one on every pair of lines, in every city',
+  inversions === 0, `${inversions} inversions in ${pairs} line pairs`);
+
+/**
+ * Door to door is a different question and is DELIBERATELY not ordered: the
+ * train wins over distance and loses over two stops, because you wait over a
+ * minute for it. That trade is the reason there are four modes instead of a
+ * speed slider — but it is only fair if the player can see the frequency,
+ * which is why the map legend prints it.
+ */
+const doorToDoor = (m: ModeId, metres: number) => {
+  const lines = cities.flatMap((c) => c.lines.filter((l) => l.mode === m));
+  const v = avg(speeds[m]);
+  const wait = avg(lines.map((l) => l.headway / 2));
+  return metres / (wait + metres / v);
+};
+note(`door to door: over 800m  train ${doorToDoor('train', 800).toFixed(1)} vs ` +
+  `metro ${doorToDoor('metro', 800).toFixed(1)} m/s`);
+note(`              over 2500m train ${doorToDoor('train', 2500).toFixed(1)} vs ` +
+  `metro ${doorToDoor('metro', 2500).toFixed(1)} m/s`);
+check('the train loses at short range and wins at long — the trade is real',
+  doorToDoor('train', 800) < doorToDoor('metro', 800)
+  && doorToDoor('train', 2500) > doorToDoor('metro', 2500),
+  'crossover sits between 800m and 2500m');
 
 describe('reachability');
 

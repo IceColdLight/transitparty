@@ -118,28 +118,17 @@ export function drawWorld(
     }
   }
 
-  // ── stops ───────────────────────────────────────────────────────────────
+  // ── stops. Names come later, once nothing can be drawn over them ────────
   const showNames = cam.scale > 0.55;
   for (const s of city.stops) {
     if (!onScreen(s.x, s.y, 60)) continue;
-    const inter = s.lines.length > 1;
-    const r = inter ? 13 : 8.5;
     ctx.beginPath();
-    ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+    ctx.arc(s.x, s.y, s.lines.length > 1 ? 13 : 8.5, 0, Math.PI * 2);
     ctx.fillStyle = '#f2f6fa';
     ctx.fill();
     ctx.lineWidth = 3.5;
     ctx.strokeStyle = '#0e1218';
     ctx.stroke();
-    if (showNames && (inter || cam.scale > 0.95)) {
-      ctx.font = `700 ${Math.round(13 / cam.scale)}px system-ui, sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.lineWidth = 4 / cam.scale;
-      ctx.strokeStyle = 'rgba(6,9,13,0.9)';
-      ctx.strokeText(s.name, s.x, s.y - r - 7);
-      ctx.fillStyle = '#cbd7e2';
-      ctx.fillText(s.name, s.x, s.y - r - 7);
-    }
   }
 
   // ── where you are going ─────────────────────────────────────────────────
@@ -187,13 +176,18 @@ export function drawWorld(
     ctx.restore();
 
     if (cam.scale > 0.5) {
+      // A dwelling vehicle sits exactly on its platform, so its label goes
+      // BELOW it — above is where the station's own name lives, and the two
+      // landing on each other made both unreadable at the one moment they
+      // both matter.
+      const ly = v.atStop >= 0 ? v.y + 26 : v.y - 14;
       ctx.font = `800 ${Math.round(12 / cam.scale)}px system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.lineWidth = 4 / cam.scale;
       ctx.strokeStyle = 'rgba(6,9,13,0.9)';
-      ctx.strokeText(line.name, v.x, v.y - 14);
+      ctx.strokeText(line.name, v.x, ly);
       ctx.fillStyle = line.color;
-      ctx.fillText(line.name, v.x, v.y - 14);
+      ctx.fillText(line.name, v.x, ly);
     }
   }
 
@@ -223,9 +217,30 @@ export function drawWorld(
       ctx.textAlign = 'center';
       ctx.lineWidth = 3.5 / cam.scale;
       ctx.strokeStyle = 'rgba(6,9,13,0.9)';
-      ctx.strokeText(p.name, p.x + ox, p.y + oy - 13);
+      ctx.strokeText(p.name, p.x + ox, p.y + oy + 20);
       ctx.fillStyle = '#dfe8ee';
-      ctx.fillText(p.name, p.x + ox, p.y + oy - 13);
+      ctx.fillText(p.name, p.x + ox, p.y + oy + 20);
+    }
+  }
+
+  /**
+   * Station names, last of all. Everything else on this map moves and they do
+   * not, so a tram parked on top of "Königsplatz" is a label that vanishes at
+   * exactly the moment you are trying to work out where you are.
+   */
+  if (showNames) {
+    for (const s of city.stops) {
+      if (!onScreen(s.x, s.y, 60)) continue;
+      const inter = s.lines.length > 1;
+      if (!inter && cam.scale <= 0.95) continue;
+      const r = inter ? 13 : 8.5;
+      ctx.font = `700 ${Math.round(13 / cam.scale)}px system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.lineWidth = 4.5 / cam.scale;
+      ctx.strokeStyle = 'rgba(6,9,13,0.92)';
+      ctx.strokeText(s.name, s.x, s.y - r - 7);
+      ctx.fillStyle = '#cbd7e2';
+      ctx.fillText(s.name, s.x, s.y - r - 7);
     }
   }
 

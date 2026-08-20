@@ -320,6 +320,20 @@ export function generateNet(seed: number): {
       pts[best] = via;
     }
 
+    /**
+     * Placing stops creates them, and this line might still be rejected below.
+     * Stop ids are indices, and nothing references the new ones until the line
+     * is committed, so a rejected line rewinds the array. Without this a
+     * rejected corridor leaves stations behind that no line calls at — which
+     * was already a latent leak on the "too short" path.
+     */
+    const mark = stops.length;
+    const rewind = (): null => {
+      for (let i = mark; i < stops.length; i++) usedNames.delete(stops[i].name);
+      stops.length = mark;
+      return null;
+    };
+
     const ids: number[] = [];
     for (const p of pts) {
       const id = addStop(p);
@@ -328,13 +342,26 @@ export function generateNet(seed: number): {
       if (ids.includes(id)) continue;
       ids.push(id);
     }
-    if (ids.length < 3) return null;
+    if (ids.length < 3) return rewind();
 
     const legs: number[] = [];
+    let span = 0;
     for (let i = 0; i + 1 < ids.length; i++) {
-      legs.push(Math.max(4, dist(stops[ids[i]], stops[ids[i + 1]]) / spec.speed));
+      const d = dist(stops[ids[i]], stops[ids[i + 1]]);
+      span += d;
+      legs.push(Math.max(4, d / spec.speed));
     }
     const oneWay = legs.reduce((a, b) => a + b, 0) + ids.length * spec.dwell;
+
+    /**
+     * What you actually travel at, end to end, dwells included — and the one
+     * number that has to keep the modes in order. See MODES.effMin/effMax: a
+     * line whose stops got dragged together by interchange merges can come out
+     * slower than the mode below it, and the corridor is simply redrawn.
+     */
+    const effective = span / (oneWay - spec.dwell);
+    if (effective < spec.effMin || effective > spec.effMax) return rewind();
+
     const cycle = oneWay * 2;
     // A whole number of vehicles, then the headway back-computed from it. If
     // you take the mode's headway literally you get a remainder, and a
@@ -360,7 +387,7 @@ export function generateNet(seed: number): {
 
   /** A line that gets over the water, built as two corridors meeting on a bridge. */
   const addCrossing = (mode: ModeId, bridge: Pt, bend: number) => {
-    for (let k = 0; k < 8; k++) {
+    for (let k = 0; k < 20; k++) {
       const a = onBank(1), b = onBank(-1);
       if (!a || !b) continue;
       const left = corridor(r, a, bridge, bend * 0.5);
@@ -383,7 +410,7 @@ export function generateNet(seed: number): {
   /** Lay the remaining lines of a mode, alternating banks so both get a network. */
   const fill = (mode: ModeId, count: number, bend: number, viaHub: number, target?: number) => {
     let placed = 0;
-    for (let i = 0; placed < count && i < count * 6; i++) {
+    for (let i = 0; placed < count && i < count * 14; i++) {
       const bank: 1 | -1 = i % 2 === 0 ? mainBank : (-mainBank as 1 | -1);
       const span = spanOn(bank, target);
       if (!span) continue;

@@ -31,6 +31,7 @@ race yourself and watch the sync work.
 | `npm run dev` | Serves the client, and proxies the game socket at `/ws`. |
 | `npm run typecheck` | `tsc --noEmit`. Run it before you trust a change. |
 | `npm test` | Every suite, each in its own process. |
+| `npm run shots` | Renders the world view and the network map to `shots/*.png`, with no browser. `npm run shots -- 4242` for a specific seed. |
 
 > **Heads up:** `npm run server` uses `tsx watch`, so editing anything under
 > `src/server` or `src/shared` restarts it — which starts a **new round in a
@@ -84,7 +85,9 @@ miss — **which direction it is going**. Boarding the right line the wrong way
 is how most races are lost.
 
 **Hold TAB and plan.** The map shows the whole network and every vehicle on it,
-live. It does not show you where you are walking, so holding it costs you.
+live, with a legend down the left telling you what each line is, how fast it
+actually travels and how often it comes. It does not show you where you are
+walking, so holding it costs you.
 
 **The map lies about distance.** It is a diagram, not a map: the centre is
 enlarged and the outskirts are squashed, exactly like every transit map you
@@ -105,15 +108,24 @@ and double that at a terminus. You cannot step off one in motion.
 
 Each one is the right answer somewhere, and each one is a trap somewhere else.
 
-| | speed | comes every | stops every | |
+| | actually travels at | comes every | stops every | |
 | --- | --- | --- | --- | --- |
-| **S** train | 34 m/s | ~2½ min | 950m | Crosses the whole city. Three or four stations in it. Worth waiting for over distance, absurd for two stops. |
-| **M** metro | 19 m/s | ~75s | 540m | The backbone — where it goes. |
-| **T** tram | 11 m/s | ~50s | 300m | Usually the thing that covers the last 600m the metro missed. |
-| **B** bus | 8 m/s | ~40s | 195m | Barely faster than running, but always nearby and always soon. |
+| **S** train | ~79 km/h | ~2½ min | 950m | Crosses the whole city. Three or four stations in it. Worth waiting for over distance, absurd for two stops. |
+| **M** metro | ~52 km/h | ~75s | 540m | The backbone — where it goes. |
+| **T** tram | ~32 km/h | ~50s | 300m | Usually the thing that covers the last 600m the metro missed. |
+| **B** bus | ~24 km/h | ~40s | 195m | Barely faster than running, but always nearby and always soon. |
+| | on foot | ~9 km/h | — | Never the plan. Crossing the city takes about twelve minutes against a par of five and a half. |
 
-Walking is 2.4 m/s, and it is never the plan. Crossing the city on foot takes
-about twelve minutes against a par of five and a half.
+Those speeds are what the lines really average end to end, dwells included —
+not a cruise figure nobody travels at. **The order is guaranteed:** every train
+line in every city is faster than every metro line, every metro faster than
+every tram, every tram faster than every bus. You never have to wonder.
+
+**Door to door is a different question, and deliberately not ordered.** You
+wait over two minutes for a train, so over 800m the metro beats it and over
+2500m it does not. That crossover is the reason there are four modes instead
+of a speed slider, and it is why the map legend prints the frequency next to
+the speed.
 
 ---
 

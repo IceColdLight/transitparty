@@ -6,12 +6,14 @@
     "dev": "vite",
     "server": "tsx watch src/server/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx tests/run.ts"
+    "test": "tsx tests/run.ts",
+    "shots": "tsx tools/shots.ts"
   },
   "dependencies": {
     "ws": "^8.16.0"
   },
   "devDependencies": {
+    "@napi-rs/canvas": "^1.0.7",
     "@types/node": "^20.11.0",
     "@types/ws": "^8.5.10",
     "tsx": "^4.7.0",
