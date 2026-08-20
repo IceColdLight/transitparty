@@ -369,6 +369,62 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
   }
 
   /**
+   * Footways down both sides of every street.
+   *
+   * They separate the part of the road you share with a tram from the part you
+   * do not, which the game has needed since traffic went into lanes: the
+   * carriageway is where you get run over and the pavement is where you wait.
+   * Laid in segments BETWEEN junctions, because a continuous strip would pave
+   * straight across every crossing.
+   *
+   * Barely raised. Walking is flat — there is one ground plane and the kerb is
+   * not in it — so anything you could actually trip over is a step the player
+   * walks through.
+   */
+  {
+    const half = city.streets.width / 2;
+    const walkW = half - (LANES.base + (LANES.count - 1) * LANES.gap + 2.4);
+    const mid = half - walkW / 2;
+    const slabs: THREE.BufferGeometry[] = [];
+    const gap = half + 1;
+
+    const run = (a: number, b: number, fixed: number, vertical: boolean) => {
+      const len = b - a;
+      if (len < 6) return;
+      for (const side of [-1, 1]) {
+        const g = new THREE.BoxGeometry(
+          vertical ? walkW : len, 0.16, vertical ? len : walkW,
+        );
+        g.translate(
+          vertical ? fixed + side * mid : (a + b) / 2,
+          0.08,
+          vertical ? (a + b) / 2 : fixed + side * mid,
+        );
+        slabs.push(g);
+      }
+    };
+
+    for (const x of city.streets.xs) {
+      const cuts = [0, ...city.streets.ys, CITY.height];
+      for (let i = 0; i + 1 < cuts.length; i++) {
+        run(cuts[i] + (i === 0 ? 0 : gap), cuts[i + 1] - (i + 2 === cuts.length ? 0 : gap), x, true);
+      }
+    }
+    for (const y of city.streets.ys) {
+      const cuts = [0, ...city.streets.xs, CITY.width];
+      for (let i = 0; i + 1 < cuts.length; i++) {
+        run(cuts[i] + (i === 0 ? 0 : gap), cuts[i + 1] - (i + 2 === cuts.length ? 0 : gap), y, false);
+      }
+    }
+
+    if (slabs.length) {
+      const g = mergeGeometries(slabs, false)!;
+      slabs.forEach((x) => x.dispose());
+      scene.add(new THREE.Mesh(keep(g), keep(new THREE.MeshLambertMaterial({ color: 0x6b7079 }))));
+    }
+  }
+
+  /**
    * Road markings. They are not decoration: standing on the deck of a tram
    * doing thirty metres a second down a straight grey street, the dashes going
    * past are the only thing telling you how fast you are moving. Without them
@@ -675,7 +731,7 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
       return best;
     };
 
-    const MOUNT = 3.4;
+    const MOUNT = 3.9;
     for (let i = 0; i < city.streets.xs.length; i++) {
       for (let j = 0; j < city.streets.ys.length; j++) {
         const x = city.streets.xs[i], y = city.streets.ys[j];
@@ -696,10 +752,17 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
           // The corner of the building nearest the junction, one plate per face.
           const sx = Math.sign(x - b.x) || 1;
           const sy = Math.sign(y - b.y) || 1;
-          const cx = b.x + sx * (b.w / 2 + 0.12);
-          const cy = b.y + sy * (b.d / 2 + 0.12);
-          const inx = b.x + sx * (b.w / 2 - 1.6);
-          const iny = b.y + sy * (b.d / 2 - 1.6);
+          /**
+           * Well clear of the wall, and set back from the corner.
+           *
+           * At 12cm the plate was inside the plinth's overhang — the ground
+           * storey is drawn 70cm wider than the mass — so the corner buildings
+           * simply swallowed their own signs.
+           */
+          const cx = b.x + sx * (b.w / 2 + 0.55);
+          const cy = b.y + sy * (b.d / 2 + 0.55);
+          const inx = b.x + sx * (b.w / 2 - 2.0);
+          const iny = b.y + sy * (b.d / 2 - 2.0);
           // faces along z carry the north-south street; faces along x the other
           put(city.streets.xNames[i], inx, MOUNT, cy, sy > 0 ? 0 : Math.PI, false);
           put(city.streets.yNames[j], cx, MOUNT - 0.95, iny,
@@ -922,8 +985,16 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
     const T = 0.16;                       // panel thickness
     const doorH = closed ? 2.1 : b.wall;  // a doorway you walk through
 
-    // floor
-    box(dark, b.l, b.deck, b.w, 0, b.deck / 2, 0);
+    /**
+     * The floor, and the room under it for the running gear.
+     *
+     * The body used to start at y=0, so a bus sat flat on the tarmac with its
+     * wheels buried in the underframe. It rides on its wheels now: the floor
+     * pan starts a wheel's radius up and the axles fill the gap.
+     */
+    const clear = b.deck * 0.62;
+    box(dark, b.l, b.deck - clear, b.w, 0, clear + (b.deck - clear) / 2, 0);
+    box(dark, b.l * 0.9, clear * 0.55, b.w * 0.78, 0, clear * 0.72, 0);
 
     /** The lengths of wall left between the doorways. */
     const spans = b.doors
@@ -941,10 +1012,21 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
       const z = side * (b.w / 2 - T / 2);
       for (const pn of panels) {
         box(body, pn.len, b.wall, T, pn.c, b.deck + b.wall / 2, z);
-        // glazing, on the outside of the panel
-        const gy = b.deck + (closed ? 1.5 : 0.72);
-        const gh = closed ? 1.0 : 0.34;
-        if (pn.len > 1) box(glass, pn.len - 0.5, gh, T * 0.6, pn.c, gy, z + side * T * 0.5);
+        /**
+         * Glazing, recessed into the panel with a frame of body colour left
+         * showing round it.
+         *
+         * A closed vehicle gets a deep window band. A ROAD vehicle keeps its
+         * sides open above the waist rail and gets only a low light in the
+         * panel itself — the open side is not laziness, it is the rule that
+         * lets you vault out of a moving tram, and filling it with glass you
+         * can walk through would be trading a mechanic for a pane.
+         */
+        const gy = b.deck + (closed ? 1.55 : 0.66);
+        const gh = closed ? 1.15 : 0.4;
+        if (pn.len > 1.4) {
+          box(glass, pn.len - 0.55, gh, T * 0.9, pn.c, gy, z + side * T * 0.25);
+        }
       }
       // lintels over the doors, so a doorway is a door and not a slot to the roof
       if (closed) {
@@ -989,14 +1071,25 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
       }
     }
 
-    // running gear, under the floor
-    const axles = mode === 'bus' ? [-0.32, 0.34] : [-0.34, 0.34];
-    for (const a of axles) {
-      for (const side of [-1, 1]) {
-        const wheel = new THREE.CylinderGeometry(b.deck * 0.62, b.deck * 0.62, 0.34, 8);
-        wheel.rotateX(Math.PI / 2);
-        wheel.translate(a * b.l, b.deck * 0.55, side * (b.w / 2 - 0.24));
-        dark.push(wheel);
+    /**
+     * Running gear. A bus has two axles at the ends of it; anything on rails
+     * has bogies, which are a pair of close-set axles under a frame — and it
+     * is the give-away silhouette from any distance.
+     */
+    const bogie = closed || mode === 'tram';
+    const centres = mode === 'bus' ? [-0.31, 0.33] : [-0.34, 0.34];
+    for (const a of centres) {
+      const axles = bogie ? [a - 0.045, a + 0.045] : [a];
+      if (bogie) {
+        box(dark, b.l * 0.13, clear * 0.85, b.w * 0.62, a * b.l, clear * 0.62, 0);
+      }
+      for (const ax of axles) {
+        for (const side of [-1, 1]) {
+          const wheel = new THREE.CylinderGeometry(clear, clear, 0.3, 10);
+          wheel.rotateX(Math.PI / 2);
+          wheel.translate(ax * b.l, clear, side * (b.w / 2 - 0.3));
+          dark.push(wheel);
+        }
       }
     }
 
@@ -1015,9 +1108,13 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
       // a nose, so the front of a train looks like the front of a train
       box(body, b.l * 0.06, b.wall * 0.72, b.w * 0.86, b.l * 0.5, b.deck + b.wall * 0.36, 0);
     }
-    if (mode === 'bus') {
-      // a windscreen, so the front end reads as the front end
-      box(glass, 0.1, b.h - b.wall - 0.4, b.w * 0.88, b.l / 2 - 0.2, b.deck + b.wall + 0.6, 0);
+    if (!closed) {
+      // A windscreen at each end, which is where the glass belongs on
+      // something with open sides.
+      for (const end of [-1, 1]) {
+        box(glass, 0.12, b.h - b.wall - 0.5, b.w * 0.84,
+          end * (b.l / 2 - 0.25), b.deck + b.wall + (b.h - b.wall) / 2 - 0.1, 0);
+      }
     }
     if (mode === 'tram') {
       // an articulation waist, narrower than the rest of it

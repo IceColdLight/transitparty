@@ -280,6 +280,29 @@ ground. What is genuinely unbuildable — the railway strip, and the parks — i
 fenced, because land you can see and cannot enter is indistinguishable from an
 invisible wall unless something marks the edge.
 
+Cosmetic, but each was a mismatch between what the city looked like and what
+it was:
+
+- **Corner buildings swallowed their own street signs.** The plate stood 12cm
+  off the wall and the ground storey is drawn 70cm wider than the mass, so the
+  plinth ate it. It stands well clear now.
+- **Buses and trams sat flat on the tarmac** with their wheels buried in the
+  underframe. The floor pan starts a wheel's radius up and the axles fill the
+  gap; anything on rails got bogies, which is the give-away silhouette at any
+  distance.
+- **Footways.** They separate the part of the road you share with a tram from
+  the part you do not, which the game has needed since traffic went into
+  lanes. Laid in segments BETWEEN junctions — a continuous strip paves across
+  every crossing — and barely raised, because walking is flat and a kerb you
+  could trip over is a step the player walks through.
+
+Glass went in everywhere it does not fight the physics: a deep window band on
+the sealed modes, a low light in the waist panels and a windscreen at each end
+on the open ones. Road vehicles keep their open sides ABOVE the waist rail on
+purpose — that gap is the rule that lets you vault out of a moving tram, and
+filling it with glass you can walk through would be trading a mechanic for a
+pane.
+
 A stairwell also needed WALLS. Without them you can walk off the side halfway
 down and reappear on the road above, and anyone on the pavement can wander
 into the hole sideways. You go in at the top and out at the bottom.
