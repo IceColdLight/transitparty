@@ -45,7 +45,15 @@ export function makeStreets(r: Rng): Streets {
     out.push(extent - 40);
     return out;
   };
-  return { xs: line(CITY.width), ys: line(CITY.height), width: 26 };
+  /**
+   * 34m kerb to kerb, which is a boulevard rather than a street, and it is the
+   * lane count that demands it: three lanes each way plus a platform clear of
+   * the outermost one does not fit in anything narrower. At 26m there was room
+   * for two lanes, eight lane-and-bay combinations for eighteen lines, and
+   * consequently traffic that drove through itself wherever two routes shared
+   * a road.
+   */
+  return { xs: line(CITY.width), ys: line(CITY.height), width: 34 };
 }
 
 /** Can you stand here? Only if you are on a street. */
@@ -255,12 +263,16 @@ export function walkDistances(g: WalkGraph, from: number, limit = Infinity): Flo
  * Where you wait for a vehicle: beside the road, not in it. Which side is
  * arbitrary but must be stable, so it comes from the stop's own id.
  */
-export function platformAt(s: Streets, p: Pt, id: number): Pt {
+/**
+ * A platform, on the given side of the road. There is one on each side,
+ * because traffic keeps to one side and so the platform you want depends on
+ * which way you are going — which is a question worth having to ask.
+ */
+export function platformAt(s: Streets, p: Pt, id: number, side: 1 | -1 = 1): Pt {
   const h = s.width / 2;
   const onVertical = s.xs.some((x) => Math.abs(p.x - x) <= h);
   const onHorizontal = s.ys.some((y) => Math.abs(p.y - y) <= h);
   const bits = Math.imul(id, 2654435761) >>> 0;
-  const side = bits % 2 === 0 ? 1 : -1;
   const other = (bits >> 1) % 2 === 0 ? 1 : -1;
 
   /**
@@ -273,7 +285,7 @@ export function platformAt(s: Streets, p: Pt, id: number): Pt {
    * and were carried off before the clock started.
    */
   if (onVertical && onHorizontal) {
-    return { x: p.x + side * PLATFORM.offset, y: p.y + other * PLATFORM.offset };
+    return { x: p.x + side * PLATFORM.offset, y: p.y + side * other * PLATFORM.offset };
   }
   return onVertical
     ? { x: p.x + side * PLATFORM.offset, y: p.y }

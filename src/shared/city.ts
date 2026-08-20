@@ -29,7 +29,7 @@
  * And only four lines cross the water. That is the chokepoint the first
  * cities lacked; see river.ts for the measurements that forced it.
  */
-import { CITY, FLEET, MODES, RACE, TEMPO, type ModeId } from './constants.js';
+import { CITY, FLEET, LANES, MODES, RACE, TEMPO, type ModeId } from './constants.js';
 import { type Rng, pick, range, rng } from './rng.js';
 import { type River, bankOf, illegalCrossing } from './river.js';
 import { type Net, bestRoute, pedestrian, walkNeighbours, walkTime } from './routing.js';
@@ -385,9 +385,21 @@ export function generateNet(seed: number): {
      * The tolerance is half a carriageway: on a street, or not on one.
      */
     if (onRoad) {
+      /**
+       * How far off square a leg may be, and it is NOT half the street.
+       *
+       * It used to be, and widening the road to fit three lanes each way
+       * quietly widened this with it: a leg could wander seventeen metres off
+       * the axis, which put it outside the road once the lane offset was added
+       * on top. The tolerance is what is left of the half-width after the
+       * outermost lane and the vehicle itself have taken their share.
+       */
+      const slack = streets.width / 2
+        - (LANES.base + (LANES.count - 1) * LANES.gap) * LANES.maxMitre
+        - MODES.tram.width / 2;
       for (let i = 0; i + 1 < ids.length; i++) {
         const a = stops[ids[i]], b = stops[ids[i + 1]];
-        if (Math.min(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) > streets.width / 2) return rewind();
+        if (Math.min(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) > Math.max(2, slack)) return rewind();
       }
     }
 
@@ -438,7 +450,7 @@ export function generateNet(seed: number): {
       id, mode,
       name: `${spec.prefix}${counters[mode]}`,
       color: spec.colors[(counters[mode] - 1) % spec.colors.length],
-      stops: ids, legs, oneWay, cycle,
+      stops: ids, legs, oneWay, cycle, lane: [], berth: [],
       dwell: spec.dwell,
       headway: cycle / fleet,
       fleet,
@@ -513,7 +525,187 @@ export function generateNet(seed: number): {
   fill('tram', FLEET.tram - 1, 230, 1, 1700);
   fill('bus', FLEET.bus, 300, 0, 1100);
 
+  assignLanes(stops, lines);
   return { stops, lines, streets, blocks: makeBlocks(streets, r), river, hub };
+}
+
+/**
+ * Give every line a lane and a stopping bay, and hand out the combinations so
+ * that lines which actually share a street do not share one.
+ *
+ * Handing them out by line id looks fine and is not: a city has about a dozen
+ * road lines and eight combinations, so a few pairs collide by arithmetic —
+ * and because buses all travel at the same speed, a colliding pair does not
+ * merely brush past, it drives inside its twin for half a kilometre and parks
+ * inside it at the stop where you were trying to tell them apart.
+ *
+ * So it is a graph colouring instead. Lines that share a stop are neighbours,
+ * the busiest lines are served first, and each takes the least contested
+ * combination left. Cheap, and it puts the separation where the conflicts are.
+ */
+function assignLanes(stops: Stop[], lines: Line[]) {
+  /**
+   * Neighbours are lines that RUN NEAR EACH OTHER, not merely lines that share
+   * a stop.
+   *
+   * Sharing a stop was the obvious relation and it missed most of the
+   * conflicts: two bus routes can run the length of the same street and stop
+   * at different points along it, never sharing a node, and those are exactly
+   * the pairs that then drive inside one another for half a kilometre. What
+   * matters is whether the two alignments come within a vehicle's width of
+   * each other anywhere.
+   */
+  const near = 14;
+  const segDist = (a1: Pt, a2: Pt, b1: Pt, b2: Pt) => {
+    // Cheap and good enough: closest approach of sampled points on each leg.
+    let best = Infinity;
+    for (let i = 0; i <= 4; i++) {
+      const p1 = { x: a1.x + (a2.x - a1.x) * (i / 4), y: a1.y + (a2.y - a1.y) * (i / 4) };
+      for (let j = 0; j <= 4; j++) {
+        const p2 = { x: b1.x + (b2.x - b1.x) * (j / 4), y: b1.y + (b2.y - b1.y) * (j / 4) };
+        best = Math.min(best, Math.hypot(p1.x - p2.x, p1.y - p2.y));
+      }
+    }
+    return best;
+  };
+  /**
+   * Two kinds of neighbour, and they are not equally important.
+   *
+   * Lines that call at the SAME STOP must not share a lane: that is the moment
+   * the player is choosing which vehicle to walk to, and two of them in the
+   * same three metres makes the choice impossible. Lines that merely run down
+   * the same street should also differ, but if something has to give, it gives
+   * here — mid-street overlap is untidy, and a stop you cannot read is a
+   * broken game.
+   */
+  const sharesStop = lines.map(() => new Set<number>());
+  for (const s of stops) {
+    for (const a of s.lines) for (const b of s.lines) if (a !== b) sharesStop[a].add(b);
+  }
+
+  const neighbours = lines.map(() => new Set<number>());
+  for (let a = 0; a < lines.length; a++) {
+    for (let b = a + 1; b < lines.length; b++) {
+      let touch = false;
+      for (let i = 0; i + 1 < lines[a].stops.length && !touch; i++) {
+        for (let j = 0; j + 1 < lines[b].stops.length && !touch; j++) {
+          if (segDist(
+            stops[lines[a].stops[i]], stops[lines[a].stops[i + 1]],
+            stops[lines[b].stops[j]], stops[lines[b].stops[j + 1]],
+          ) < near) touch = true;
+        }
+      }
+      if (touch) { neighbours[a].add(b); neighbours[b].add(a); }
+    }
+  }
+  // One slot per lane. The other half of the separation — which stand a line
+  // uses at a given stop — is decided per stop, below, so it does not need a
+  // slot of its own here.
+  const slots = Array.from({ length: LANES.count }, (_, lane) => ({ lane }));
+
+  const chosen = new Map<number, number>();
+  // Busiest first: a line calling at six interchanges has the fewest options,
+  // so it should get to choose before a line that barely meets anything.
+  const order = lines.map((l) => l.id)
+    .sort((a, b) => (sharesStop[b].size * 4 + neighbours[b].size)
+      - (sharesStop[a].size * 4 + neighbours[a].size));
+  const used = new Array(slots.length).fill(0);
+  for (const id of order) {
+    const hard = new Set<number>(), soft = new Set<number>();
+    for (const n of sharesStop[id]) {
+      const c = chosen.get(n);
+      if (c !== undefined) hard.add(c);
+    }
+    for (const n of neighbours[id]) {
+      const c = chosen.get(n);
+      if (c !== undefined) soft.add(c);
+    }
+    let best = 0, bestScore = Infinity;
+    for (let i = 0; i < slots.length; i++) {
+      // Sharing a stop outweighs sharing a street by two orders of magnitude;
+      // ties go to whichever slot is least used overall.
+      const score = (hard.has(i) ? 1000 : 0) + (soft.has(i) ? 10 : 0) + used[i];
+      if (score < bestScore) { bestScore = score; best = i; }
+    }
+    chosen.set(id, best);
+    used[best]++;
+  }
+
+  /**
+   * Which stand each line uses at each of its stops. The INDEX is handed out
+   * per stop, so every line calling there gets a different one; the direction
+   * it is measured in is the line's own, below.
+   */
+  const stand = new Map<string, number>();
+  for (const s of stops) {
+    s.lines.forEach((id, k) => {
+      stand.set(`${id}:${s.id}`, (k % LANES.berths) - (LANES.berths - 1) / 2);
+    });
+  }
+  for (const line of lines) line.berth = line.stops.map(() => ({ x: 0, y: 0 }));
+
+  for (const line of lines) {
+    const slot = slots[chosen.get(line.id)!];
+    const reach = LANES.base + slot.lane * LANES.gap;
+
+    /**
+     * A mitred offset at every stop: at an interior stop the bisector of the
+     * two legs, scaled so the offset road keeps a constant distance from the
+     * centre line through the corner, clamped because a hairpin's mitre runs
+     * away to infinity. The bay runs along the road, the lane across it.
+     */
+    line.lane = line.stops.map((_, i) => {
+      const here = stops[line.stops[i]];
+      const before = i > 0 ? stops[line.stops[i - 1]] : null;
+      const after = i + 1 < line.stops.length ? stops[line.stops[i + 1]] : null;
+      const perp = (from: Pt, to: Pt) => {
+        const dx = to.x - from.x, dy = to.y - from.y;
+        const len = Math.hypot(dx, dy) || 1;
+        return { x: -dy / len, y: dx / len };
+      };
+      const along = (n: Pt) => ({ x: n.y, y: -n.x });
+      const a = before ? perp(before, here) : null;
+      const b = after ? perp(here, after) : null;
+
+      /**
+       * The stand is measured ALONG THE LINE'S OWN PATH, not along the street.
+       *
+       * Along the street was the first attempt and it drove vehicles off the
+       * road: where a route turns a corner at a stop, the street's axis is
+       * across the line's direction, so the stand pushed the vehicle sideways
+       * into the buildings. Along its own path it is simply "pulls up a bit
+       * further down the kerb", which is what a stand is — and it still
+       * separates two lines meeting at right angles, because their paths point
+       * different ways.
+       */
+      /**
+       * No stand where the line TURNS.
+       *
+       * A stand is measured along the bisector of the two legs, which is the
+       * direction of the road only while the road is straight. At a corner the
+       * bisector points diagonally across the junction, and a 27m stand along
+       * it put a tram seven metres onto the pavement. Corner stops are a
+       * minority, so they simply forgo the separation rather than drive into
+       * the buildings to get it.
+       */
+      const turning = !!a && !!b && (a.x * b.x + a.y * b.y) < Math.cos(0.35);
+      const slotAlong = turning ? 0 : (stand.get(`${line.id}:${line.stops[i]}`) ?? 0);
+      const bay = slotAlong * LANES.berth;
+
+      const n = !a || !b
+        ? (a ?? b)!
+        : (() => {
+          const mx = a.x + b.x, my = a.y + b.y;
+          const len = Math.hypot(mx, my) || 1;
+          return { x: mx / len, y: my / len };
+        })();
+      const cos = a && b ? n.x * a.x + n.y * a.y : 1;
+      const out = Math.min(reach / Math.max(0.05, cos), reach * LANES.maxMitre);
+      const t = along(n);
+      line.berth[i] = { x: t.x * bay, y: t.y * bay };
+      return { x: n.x * out, y: n.y * out };
+    });
+  }
 }
 
 /**

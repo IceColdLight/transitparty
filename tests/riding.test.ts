@@ -117,6 +117,8 @@ for (let i = 0; i < 60 * 60 && speedOf(p.riding!, time) < WALK.speed * 1.6; i++)
   stepBody(p, still, STEP, groundAt(city, time));
 }
 const speed = speedOf(p.riding!, time);
+check('and you are still standing on its deck when you jump',
+  !!p.riding && p.grounded, `riding=${p.riding} grounded=${p.grounded} h=${p.h.toFixed(2)}`);
 
 function jumpFrom(fromVehicle: boolean): number {
   const b = fromVehicle ? { ...p } : newBody(p.x, p.y);

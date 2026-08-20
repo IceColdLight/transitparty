@@ -38,8 +38,45 @@ function locate(city: City, line: Line, run: number, time: number): Vehicle {
 
   const order = dir === 1 ? line.stops : line.stops.slice().reverse();
   const legs = dir === 1 ? line.legs : line.legs.slice().reverse();
+  const lanes = dir === 1 ? line.lane : line.lane.slice().reverse();
+  const berths = dir === 1 ? line.berth : line.berth.slice().reverse();
 
-  const at = (i: number) => city.stops[order[i]];
+  /**
+   * Where this line's vehicles actually run: the stop, pushed sideways into
+   * its lane. The displacement is subtracted on the return leg, so the two
+   * directions pass each other rather than through each other.
+   *
+   * The timetable is still measured along the centre line, so a vehicle's real
+   * speed varies by a per cent or two around a corner. Nobody can see that;
+   * everybody could see two trams occupying the same three metres of road.
+   */
+  /**
+   * The lane flips with the direction of travel — that is what puts opposing
+   * traffic on opposite sides. The berth does not: a stand is a place on the
+   * kerb and it is the same place whichever way you arrived.
+   */
+  const at = (i: number): { x: number; y: number } => {
+    const s = city.stops[order[i]];
+    const l = lanes[i];
+    return { x: s.x + l.x * dir, y: s.y + l.y * dir };
+  };
+
+  /**
+   * How much of a stand's offset applies partway along a leg.
+   *
+   * A berth is where a vehicle PULLS UP, not where it drives. Applied to the
+   * whole path it dragged the route with it — a stand 27m up a north-south
+   * street and the next one 27m along an east-west one put the straight line
+   * between them well off the road, and buses drove across blocks. It fades in
+   * over the last stretch of the approach and out over the first stretch of
+   * the departure, so the run itself stays in its lane.
+   */
+  const BERTH_FADE = 0.3;
+  const berthAt = (i: number, u: number) => {
+    const b = berths[i];
+    const w = Math.max(0, 1 - u / BERTH_FADE);
+    return { x: b.x * w, y: b.y * w };
+  };
   const mk = (
     x: number, y: number, angle: number, atStop: number, nextStop: number,
     eta: number, doorTime: number,
@@ -52,9 +89,11 @@ function locate(city: City, line: Line, run: number, time: number): Vehicle {
       // "how long have I got to run" is the only question being asked here.
       const doorTime = line.dwell - q + (i === n - 1 ? line.dwell : 0);
       const nextIdx = i < n - 1 ? i + 1 : n - 2;
-      const p = at(i), nx = at(nextIdx);
+      const base = at(i), nx = at(nextIdx);
+      const b = berths[i];
+      const p = { x: base.x + b.x, y: base.y + b.y };
       const legTime = i < n - 1 ? legs[i] : legs[n - 2];
-      return mk(p.x, p.y, Math.atan2(nx.y - p.y, nx.x - p.x), order[i], order[nextIdx],
+      return mk(p.x, p.y, Math.atan2(nx.y - base.y, nx.x - base.x), order[i], order[nextIdx],
         doorTime + legTime, doorTime);
     }
     q -= line.dwell;
@@ -62,15 +101,21 @@ function locate(city: City, line: Line, run: number, time: number): Vehicle {
       if (q < legs[i]) {
         const u = q / legs[i];
         const p = at(i), nx = at(i + 1);
-        return mk(p.x + (nx.x - p.x) * u, p.y + (nx.y - p.y) * u,
-          Math.atan2(nx.y - p.y, nx.x - p.x), -1, order[i + 1], legs[i] - q, 0);
+        const b0 = berthAt(i, u), b1 = berthAt(i + 1, 1 - u);
+        return mk(
+          p.x + (nx.x - p.x) * u + b0.x + b1.x,
+          p.y + (nx.y - p.y) * u + b0.y + b1.y,
+          Math.atan2(nx.y - p.y, nx.x - p.x), -1, order[i + 1], legs[i] - q, 0,
+        );
       }
       q -= legs[i];
     }
   }
 
-  const p = at(n - 1), pv = at(n - 2);
-  return mk(p.x, p.y, Math.atan2(p.y - pv.y, p.x - pv.x), order[n - 1], order[n - 2], 0, 0);
+  const base = at(n - 1), pv = at(n - 2);
+  const bl = berths[n - 1];
+  return mk(base.x + bl.x, base.y + bl.y,
+    Math.atan2(base.y - pv.y, base.x - pv.x), order[n - 1], order[n - 2], 0, 0);
 }
 
 export function vehiclesOnLine(city: City, lineId: number, time: number): Vehicle[] {

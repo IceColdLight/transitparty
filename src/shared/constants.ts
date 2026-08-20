@@ -180,8 +180,85 @@ export const PLAYER = {
  * between the platform and the widest vehicle in the city, and boarding
  * becomes what it should be: you walk out and get on THAT one.
  */
+/**
+ * Traffic lanes.
+ *
+ * Vehicle position is a pure function of the timetable, and nothing avoids
+ * anything else, so every line calling at a stop parked in the same three
+ * metres of road and every pair of lines sharing a street drove through each
+ * other. In a top-down view that was untidy; in first person it made a
+ * chokepoint unreadable — you could not tell what was there, let alone pick
+ * the one you wanted.
+ *
+ * Each line is displaced sideways from the centre of the road, and the
+ * displacement FLIPS with the direction of travel, so the city drives on one
+ * side like a city. That alone separates every head-on pair. The lane index
+ * then splits same-direction lines between two lanes.
+ *
+ * The displacement is baked into the geometry at generation time as a mitred
+ * offset at each stop, not applied at runtime from the current heading —
+ * computed live, the offset vector swings through ninety degrees at a corner
+ * and the vehicle jumps across the junction.
+ */
+export const LANES = {
+  /** distance from the centre line to the first lane */
+  base: 2.2,
+  /** and to the next one out — wider than the widest vehicle, so adjacent
+   *  lanes cannot touch however they are assigned */
+  gap: 4.0,
+  count: 3,
+  /**
+   * How far a mitre may stretch the offset at a corner, as a multiple of the
+   * lane's own width.
+   *
+   * A mitre keeps the offset road parallel to the centre line through a bend,
+   * and the sharper the bend the further out the corner point goes — to
+   * infinity at a hairpin. Clamping the ANGLE instead of the distance let a
+   * bus route's tightest corner throw a vehicle 16.6m sideways, which is
+   * outside the road it is supposed to be driving on.
+   */
+  maxMitre: 1.15,
+  /**
+   * How far apart, ALONG the road, different lines pull up at the same stop.
+   *
+   * Lanes separate opposing traffic and split same-direction lines two ways,
+   * and that still left the worst case untouched: two bus lines sharing a lane
+   * and a street travel at the same speed, so they can sit inside each other
+   * for half a kilometre — and, much worse, park in the same three metres at
+   * the stop where you are trying to tell them apart.
+   *
+   * Giving each line its own bay is the fix that matters, because the moment
+   * that has to be readable is the one where you are choosing. It is baked
+   * into the geometry alongside the lane offset, for the same reason: applied
+   * from the heading at runtime it would swing round at every corner.
+   */
+  /**
+   * Where each line stands AT a stop, measured along the street rather than
+   * along the line.
+   *
+   * Lanes are expressed in each line's own frame, which separates lines that
+   * run parallel and does nothing at all for lines that meet a stop from
+   * different directions — a tram coming north and a bus coming east both sat
+   * on the junction with their offsets pointing different ways, two metres
+   * apart. Berths are in the street's frame, so they separate everything that
+   * calls there whatever direction it arrived from.
+   *
+   * Four stands, spread along the kerb, and the platform is drawn long enough
+   * to reach all of them. Beyond four lines a stop starts reusing them, which
+   * is the residue this does not fix.
+   */
+  berth: 18,
+  berths: 4,
+};
+
 export const PLATFORM = {
-  offset: 5,
+  /**
+   * Clear of the outermost lane by a comfortable margin. There is one of these
+   * on EACH side of the road, because with traffic keeping to one side the
+   * platform you want depends on which way you are going — which is the
+   * question the game most wants you to have to ask.
+   */
+  offset: 14.5,
   /**
    * Barely a kerb. The platform is drawn but not simulated — walking is flat,
    * on the street plane — so anything you could actually trip over is a step
@@ -189,7 +266,7 @@ export const PLATFORM = {
    */
   height: 0.06,
   length: 16,
-  width: 4,
+  width: 3.4,
 };
 
 /**
@@ -202,9 +279,10 @@ export const PLATFORM = {
  * rather than a wait with scenery.
  *
  * The decks are all under PLAYER.step, so a doorway is walked through rather
- * than climbed into. The widths are a little over life size: a 2.55m bus is a
- * miserable thing to land on at speed, and the extra half metre is the
- * difference between a stunt that works and one that works sometimes.
+ * than climbed into. The widths are close to life size — they were half a
+ * metre wider when landing on a roof was how you boarded, and once doors
+ * became the way in, the extra width bought nothing and cost lane separation
+ * on a road only so wide.
  */
 export const BODIES: Record<ModeId, {
   /** length, width and overall height in metres */
@@ -227,10 +305,10 @@ export const BODIES: Record<ModeId, {
   doors: number[];
   doorWidth: number;
 }> = {
-  train: { l: 46, w: 4.0, h: 4.0, deck: 0.7, wall: 3.3, doors: [-0.38, -0.14, 0.14, 0.38], doorWidth: 1.8 },
-  metro: { l: 34, w: 3.6, h: 3.6, deck: 0.6, wall: 3.0, doors: [-0.36, -0.12, 0.12, 0.36], doorWidth: 1.7 },
-  tram: { l: 22, w: 3.2, h: 3.4, deck: 0.5, wall: 1.05, doors: [-0.34, 0, 0.34], doorWidth: 1.6 },
-  bus: { l: 13, w: 3.0, h: 3.2, deck: 0.5, wall: 1.05, doors: [-0.3, 0.28], doorWidth: 1.5 },
+  train: { l: 46, w: 3.4, h: 4.0, deck: 0.7, wall: 3.3, doors: [-0.38, -0.14, 0.14, 0.38], doorWidth: 1.8 },
+  metro: { l: 34, w: 3.1, h: 3.6, deck: 0.6, wall: 3.0, doors: [-0.36, -0.12, 0.12, 0.36], doorWidth: 1.7 },
+  tram: { l: 22, w: 2.9, h: 3.4, deck: 0.5, wall: 1.05, doors: [-0.34, 0, 0.34], doorWidth: 1.6 },
+  bus: { l: 13, w: 2.7, h: 3.2, deck: 0.5, wall: 1.05, doors: [-0.3, 0.28], doorWidth: 1.5 },
 };
 
 /*
@@ -300,9 +378,9 @@ const MODE_SPECS: Record<ModeId, ModeSpec> = {
     prefix: 'S', label: 'train', colors: ['#8f6ec4', '#6f7fd0'] },
   metro: { speed: 19 * TEMPO, dwell: 6, headway: 75 / TEMPO, spacing: 540, width: 11,
     prefix: 'M', label: 'metro', colors: ['#e2574c', '#e08a33', '#d9508c', '#4aa3df'] },
-  tram:  { speed: 11 * TEMPO, dwell: 4, headway: 52 / TEMPO, spacing: 300, width: 8,
+  tram:  { speed: 11 * TEMPO, dwell: 4, headway: 78 / TEMPO, spacing: 300, width: 8,
     prefix: 'T', label: 'tram', colors: ['#2fa36b', '#3f9d9d', '#77a832', '#3f8f5c'] },
-  bus:   { speed: 8 * TEMPO,  dwell: 4, headway: 42 / TEMPO, spacing: 195, width: 6,
+  bus:   { speed: 8 * TEMPO,  dwell: 4, headway: 68 / TEMPO, spacing: 195, width: 6,
     prefix: 'B', label: 'bus', colors: ['#c9a227', '#b8863b', '#a89a3a'] },
 };
 

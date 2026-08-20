@@ -45,6 +45,19 @@ export type Line = {
   fleet: number;
   /** seconds of timetable shift, so every line in the city does not pulse together */
   offset: number;
+  /**
+   * This line's sideways displacement from the centre of the road, one vector
+   * per stop, mitred at the corners. Added for the outbound direction and
+   * subtracted for the return, which is what makes traffic keep to one side.
+   * See LANES.
+   */
+  lane: { x: number; y: number }[];
+  /**
+   * Where this line stands at each of its stops, along the street. Unlike
+   * `lane` it does NOT flip with the direction of travel — a stand is a place
+   * on the kerb, not a side of the road. See LANES.berth.
+   */
+  berth: { x: number; y: number }[];
 };
 
 export type City = {

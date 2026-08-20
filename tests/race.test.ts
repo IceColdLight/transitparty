@@ -8,7 +8,7 @@
  * departure board in front of them is doing. If the plan cannot be followed,
  * or following it is slower than walking, there is no game here.
  */
-import { RACE, TEMPO, WALK } from '../src/shared/constants.js';
+import { LANES, PLATFORM, RACE, TEMPO, WALK } from '../src/shared/constants.js';
 import { buildCity } from '../src/shared/city.js';
 import { bestRoute, walkNeighbours } from '../src/shared/routing.js';
 import { allVehicles, departures, remainingStops, vehicleById } from '../src/shared/vehicles.js';
@@ -114,23 +114,32 @@ check('nobody starts a round staring at an empty platform',
 describe('boarding');
 
 /**
- * The board radius is measured from the platform, so a vehicle with its doors
- * open has to be exactly on its stop — otherwise a tram could be "at" a stop
- * and out of reach, which is unexplainable from inside the game.
+ * A vehicle standing at a stop has to be somewhere a passenger on the platform
+ * can walk to. It is no longer ON the stop — traffic runs in lanes, so it
+ * pulls up alongside — but it must be within the width of the road, or a tram
+ * could be "at" a stop and out of reach, which is unexplainable from inside
+ * the game.
  */
-let offPlatform = 0, samples = 0;
+// The lane it runs in, the stand it pulls up at, and the width of the footway.
+const reach = LANES.base * LANES.maxMitre + (LANES.count - 1) * LANES.gap
+  + (LANES.berths - 1) / 2 * LANES.berth + PLATFORM.offset;
+let outOfReach = 0, samples = 0, furthest = 0;
 for (const c of cities.slice(0, 8)) {
   for (let t = 0; t < 300; t += 3) {
     for (const v of allVehicles(c, t)) {
       if (v.atStop < 0) continue;
       samples++;
       const s = c.stops[v.atStop];
-      if (Math.hypot(v.x - s.x, v.y - s.y) > 0.001) offPlatform++;
+      const d = Math.hypot(v.x - s.x, v.y - s.y);
+      furthest = Math.max(furthest, d);
+      if (d > reach) outOfReach++;
     }
   }
 }
-check('a vehicle with its doors open is exactly on its platform',
-  offPlatform === 0, `${offPlatform} of ${samples} samples off`);
+check('a vehicle with its doors open pulls up at a stand of its stop',
+  outOfReach === 0,
+  `furthest ${furthest.toFixed(1)}m from the stop, budget ${reach.toFixed(1)}m ` +
+  `(${samples} samples)`);
 
 /** Starting later must not change the answer's shape — no lucky t=0. */
 const late = cities.slice(0, 12).map((c, i) => ride(c, (137.5 + i * 41) / TEMPO));

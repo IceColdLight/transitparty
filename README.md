@@ -147,6 +147,12 @@ actually get standing in a city: roads, buildings, water, and a station sign
 with the lines that call at it. Where those lines *go* is a question for the
 map, and the fog means you can see to the end of the street and no further.
 
+**Traffic keeps to one side and every line has its own lane and its own stand
+at each stop.** A busy interchange is a long platform with several stands along
+it — the vehicle you want pulls up at its own one, and there is a platform on
+each side of the road because which side you want depends on which way you are
+going.
+
 **Watch out for traffic.** Anything standing over a deck is lifted onto it, so
 a bus coming through a junction while you are crossing will pick you up and
 take you with it. Sometimes that is a free ride.

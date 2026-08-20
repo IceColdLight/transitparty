@@ -8,8 +8,11 @@
  * open long enough to board, a run that skips a stop entirely.
  */
 import { MODES, TEMPO } from '../src/shared/constants.js';
+import { onStreet } from '../src/shared/streets.js';
 import { buildCity } from '../src/shared/city.js';
-import { allVehicles, departures, remainingStops, vehicleById } from '../src/shared/vehicles.js';
+import {
+  allVehicles, departures, overVehicle, remainingStops, vehicleById,
+} from '../src/shared/vehicles.js';
 import { avg, check, describe, near, note, report } from './harness.js';
 
 const city = buildCity(31337);
@@ -106,6 +109,77 @@ note(`at ${busy.name} (${busy.lines.length} lines): ` +
   `gaps ${Math.min(...gaps).toFixed(0)}–${Math.max(...gaps).toFixed(0)}s, avg ${avg(gaps).toFixed(0)}s`);
 check('no gap at a busy interchange is a punishing outlier',
   Math.max(...gaps) < 210 / TEMPO, `worst ${Math.max(...gaps).toFixed(0)}s, budget ${(210 / TEMPO).toFixed(0)}s`);
+
+describe('traffic that does not drive through itself');
+
+/**
+ * Vehicle position is a pure function of the timetable and nothing avoids
+ * anything else, so every line calling at a stop used to park in the same
+ * three metres of road and every pair sharing a street drove through each
+ * other. Top-down that was untidy; in first person it made a chokepoint
+ * unreadable — you could not tell what was there, let alone pick the one you
+ * wanted.
+ *
+ * LANES fixes it by displacing each line sideways, flipping the displacement
+ * with the direction of travel so the city drives on one side. What is
+ * measured here is the thing a player sees: how often one vehicle's centre is
+ * inside another's bodywork.
+ */
+{
+  let clashes = 0, headOn = 0, pairs = 0;
+  for (const t2 of [0, 37, 74, 111, 148, 185, 222, 259]) {
+    const fleet = allVehicles(city, t2);
+    for (let i = 0; i < fleet.length; i++) {
+      for (let j = i + 1; j < fleet.length; j++) {
+        const a = fleet[i], b2 = fleet[j];
+        if (Math.abs(a.x - b2.x) > 50 || Math.abs(a.y - b2.y) > 50) continue;
+        pairs++;
+        if (!overVehicle(city, a, b2.x, b2.y) && !overVehicle(city, b2, a.x, a.y)) continue;
+        clashes++;
+        // Nose to nose is the one that should be impossible: opposing traffic
+        // is on opposite sides of the road by construction.
+        const facing = Math.cos(a.angle - b2.angle);
+        if (facing < -0.5) headOn++;
+      }
+    }
+  }
+  note(`${clashes} of ${pairs} nearby vehicle pairs interpenetrate, ${headOn} of them head-on`);
+  check('opposing traffic never drives through itself',
+    headOn === 0, `${headOn} head-on clashes`);
+  check('and interpenetration is rare enough to read a street',
+    clashes <= pairs * 0.02, `${(100 * clashes / Math.max(1, pairs)).toFixed(2)}% of nearby pairs`);
+}
+
+/**
+ * A bus is on the road. Obvious, untested, and briefly untrue.
+ *
+ * Stands are offsets along the kerb, and applying one to a line's whole path
+ * rather than only to where it stops dragged the route with it: a stand 27m up
+ * a north-south street and the next one 27m along an east-west street put the
+ * straight line between them across the middle of a block. Buses drove through
+ * buildings, and — because a player standing off the street gets walked back
+ * onto it — anybody riding one had their velocity wiped every tick.
+ */
+{
+  const half = city.streets.width / 2;
+  let worst = 0, checked = 0, strays = 0;
+  for (let t2 = 0; t2 < 240; t2 += 2) {
+    for (const v of allVehicles(city, t2)) {
+      if (city.lines[v.line].mode !== 'bus' && city.lines[v.line].mode !== 'tram') continue;
+      checked++;
+      if (onStreet(city.streets, v)) continue;
+      strays++;
+      const dx = Math.min(...city.streets.xs.map((x) => Math.abs(v.x - x)));
+      const dy = Math.min(...city.streets.ys.map((y) => Math.abs(v.y - y)));
+      worst = Math.max(worst, Math.min(dx, dy) - half);
+    }
+  }
+  note(`${strays} of ${checked} samples overhang the kerb, worst by ${worst.toFixed(1)}m`);
+  // A wheel over the kerb at a corner is invisible. Being tens of metres out —
+  // which is what the bug did — is a bus in the middle of a block.
+  check('a bus or a tram never leaves the road it is driving on',
+    worst < 4, `worst overshoot ${worst.toFixed(1)}m of a ${city.streets.width}m road`);
+}
 
 describe('the departure board');
 

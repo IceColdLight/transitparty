@@ -21,7 +21,7 @@
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { BODIES, CITY, PLATFORM, type ModeId } from '../shared/constants.js';
+import { BODIES, CITY, LANES, PLATFORM, type ModeId } from '../shared/constants.js';
 import { platformAt } from '../shared/streets.js';
 import type { City, PlayerState, Vehicle } from '../shared/types.js';
 
@@ -267,10 +267,16 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
   // ── platforms and their signs ────────────────────────────────────────────
   const padMat = keep(new THREE.MeshLambertMaterial({ color: 0x6a717c }));
   const poleMat = keep(new THREE.MeshLambertMaterial({ color: 0x232830 }));
+  // One platform each side of the road, because traffic keeps to one side.
   for (const s of city.stops) {
-    const pad = platformAt(city.streets, s, s.id);
+   for (const side of [1, -1] as const) {
+    const pad = platformAt(city.streets, s, s.id, side);
     const onVertical = city.streets.xs.some((x) => Math.abs(s.x - x) <= city.streets.width / 2);
-    const long = PLATFORM.length, short = PLATFORM.width;
+    // Long enough to reach every stand this stop uses. A one-line stop gets a
+    // shelter; a six-line interchange gets a bus station.
+    const stands = Math.min(s.lines.length, LANES.berths);
+    const long = PLATFORM.length + (stands - 1) * LANES.berth;
+    const short = PLATFORM.width;
     const mesh = new THREE.Mesh(keep(new THREE.BoxGeometry(
       onVertical ? short : long, PLATFORM.height, onVertical ? long : short,
     )), padMat);
@@ -311,6 +317,7 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
     twin.rotation.y += Math.PI;
     twin.position.set(back.x, 3.3, back.y);
     scene.add(twin);
+   }
   }
 
   // ── where you are going, and where you started ───────────────────────────

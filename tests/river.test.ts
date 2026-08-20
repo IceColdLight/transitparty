@@ -49,10 +49,20 @@ check('most streets that reach the river simply stop at it', quays.length >= 1,
 
 if (quays.length) {
   const q = quays[Math.floor(quays.length / 2)];
-  const near = nearestOnRiver(river, { x: q.x + 1, y: q.y });
-  const len = Math.hypot(q.x - near.x, q.y - near.y) || 1;
-  // Along the road, straight at the water.
-  const dir = { x: -(q.y - near.y) / len, y: (q.x - near.x) / len };
+  /**
+   * Walk along the STREET, straight at the water.
+   *
+   * An earlier version walked perpendicular to the RIVER, which is only the
+   * same direction when the street happens to meet the water at a right
+   * angle. Where it did not, the walker started in the middle of a block and
+   * the test failed for reasons that had nothing to do with the river.
+   */
+  const h2 = city.streets.width / 2;
+  const onVertical = city.streets.xs.some((x) => Math.abs(q.x - x) <= h2);
+  const axis = onVertical ? { x: 0, y: 1 } : { x: 1, y: 0 };
+  const probe = { x: q.x + axis.x * 40, y: q.y + axis.y * 40 };
+  const toward = bankOf(river, probe) === bankOf(river, q) ? -1 : 1;
+  const dir = { x: axis.x * toward, y: axis.y * toward };
   const w = newBody(q.x - dir.x * 130, q.y - dir.y * 130);
   const startBank = bankOf(river, w);
   check('the test walker starts on a street', onStreet(city.streets, w),

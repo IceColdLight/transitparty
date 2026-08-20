@@ -118,6 +118,75 @@ route mixes rail and road in every city.
 
 ---
 
+## Traffic has to be separated, and only sideways works
+
+The complaint: *"all modes of transport glitch into each other. Especially at
+chokepoints and streets it's basically impossible to see what's going on and
+pick the right bus."*
+
+Vehicle position is a pure function of the timetable and nothing avoids
+anything else, so every line calling at a stop parked in the same three metres
+and every pair sharing a street drove through each other. Measured: **12.8% of
+pairs both standing at a stop were interpenetrating.** Top-down that was
+untidy. In first person it makes the one moment the game is about — choosing
+which vehicle to walk to — impossible.
+
+Three mechanisms, and the order they were tried in is the useful part:
+
+- **Lanes.** Each line is displaced sideways, and the displacement flips with
+  the direction of travel, so the city drives on one side. This is the one that
+  matters: it separates all opposing traffic by construction.
+- **Longitudinal bays were a dead end.** They only separate two vehicles if the
+  offset exceeds the vehicle LENGTH, and a tram is 22m. Bays spaced far enough
+  to work would put a vehicle a quarter of a block from its own stop.
+- **Stands, per line per stop.** Lanes are expressed in each LINE's frame, so
+  they separate lines that run parallel and do nothing whatever for lines
+  meeting a stop from different directions — a tram coming north and a bus
+  coming east sat on the junction two metres apart with their offsets pointing
+  different ways. A stand is an index handed out per stop, so every line
+  calling there gets a different one.
+
+The lane assignment is a graph colouring, and the graph is what took two
+attempts. Lines that share a STOP must differ — that is the moment the player
+is choosing. Lines that merely share a street should differ, and if something
+must give it gives there. Neighbours defined by shared stops alone missed most
+of the conflicts: two bus routes can run the length of one street stopping at
+different points and never share a node.
+
+Result: **at-stop interpenetration 12.8% → 3.4%**, head-on effectively gone,
+and no road vehicle ever leaves the road it is driving on.
+
+The road had to get wider to hold it — 34m, three lanes each way plus a
+platform clear of the outermost one. At 26m there was room for two lanes and
+eight combinations for eighteen lines, which pigeonholes. Vehicles also went
+back to near life-size widths; they had been half a metre over when landing on
+a roof was how you boarded, and once doors became the way in that width bought
+nothing and cost lane separation. Bus and tram headways went up by half, which
+thins the traffic and makes catching one matter more.
+
+**There are two platforms at every stop now, one each side**, because with
+traffic keeping to one side the platform you want depends on which way you are
+going — which is a question worth having to ask.
+
+Three bugs came out of it and all three are the same shape — an offset that is
+correct at a stop being applied where the vehicle is DRIVING:
+
+- the stand was applied to a line's whole path, so a stand 27m up a
+  north-south street and the next one 27m along an east-west street dragged
+  the straight line between them across the middle of a block. **Buses drove
+  through buildings** — and because a player standing off the street gets
+  walked back onto it, anyone riding one had their velocity wiped every tick,
+  which read as "jumping off a moving bus does nothing"
+- stands are measured along the bisector of the two legs, which is the
+  direction of the road only while the road is straight. At a corner it points
+  diagonally across the junction and put a tram seven metres onto the
+  pavement. Corner stops now forgo the separation rather than drive into a
+  building to get it
+- the "is this leg square to the grid" tolerance was half the street width, so
+  widening the road quietly widened the tolerance with it
+
+---
+
 ## Riding is a surface, not a state
 
 There is no board key, no boarding rule and no `riding` transition anywhere. A
@@ -537,11 +606,12 @@ you saw in the picture.
 
 Written down so they are choices rather than surprises:
 
-- **Vehicles do not collide with each other.** Two lines calling at one stop
-  will overlap visibly. The gameplay consequence is handled — you stay on what
-  you are standing on — but the picture is wrong, and fixing it properly means
-  queueing at stops, which means vehicles are no longer a pure function of the
-  clock.
+- **Vehicles still do not collide with each other.** Lanes and stands take
+  interpenetration at a stop from 12.8% to 3.4% and remove it entirely between
+  opposing traffic, but the residue is real: more than four lines at one stop
+  start reusing stands, and two routes crossing at a junction have nowhere to
+  go. Fixing it properly means queueing, which means vehicles stop being a pure
+  function of the clock.
 - **Buildings are not collision volumes.** Walking is confined to the streets,
   which is a stronger constraint and a much cheaper one, so a building is only
   ever drawn. The one place it shows is that rail alignments would otherwise
