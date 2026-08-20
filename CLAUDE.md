@@ -256,6 +256,30 @@ And two that were only visible once you went looking for them:
   the name and the line colours tore. Three centimetres along the normal fixes
   it.
 
+And three more that all came from forgetting a railway has TWO running lines.
+A vehicle sits at its stop plus its lane offset TIMES ITS DIRECTION, so the up
+line is at +lane and the down line at -lane:
+
+- **the rails were drawn once, at +lane**, so half the service ran on track and
+  the other half floated in mid-air
+- **the tunnel bore was built around one of them** and sat off to one side,
+  with the other line running out through its wall
+- **the corridor from the stairs ended over the track.** Two attempts failed
+  before the obvious one worked: backing off a fixed distance along the
+  corridor is no good when the stairs come in at an angle, because most of that
+  distance is spent travelling ALONG the platform; solving for the
+  across-component is no good when the stairs land on the station's centre
+  line, because then no distance along that line clears anything. Name the
+  destination — a point on a platform — and neither problem exists.
+
+**Empty plots you could see and not walk on** came from the same era. Buildings
+were being cleared off the metro's alignment, which was correct when rail ran
+at street level and is nonsense now it is in a tunnel: a building above a
+tunnel is exactly right. Only the viaduct and the elevated stations take up
+ground. What is genuinely unbuildable — the railway strip, and the parks — is
+fenced, because land you can see and cannot enter is indistinguishable from an
+invisible wall unless something marks the edge.
+
 A stairwell also needed WALLS. Without them you can walk off the side halfway
 down and reappear on the road above, and anyone on the pavement can wander
 into the hole sideways. You go in at the top and out at the bottom.

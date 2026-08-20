@@ -365,7 +365,7 @@ export const STATION = {
   shaftLength: 19,
   shaftWidth: 4.6,
   /** the corridor from the foot of the stairs to the platform */
-  passageWidth: 5,
+  passageWidth: 7.5,
   /**
    * Seconds the route planner adds to boarding anything that is not at street
    * level. Stairs are not free, and a planner that thinks they are quotes

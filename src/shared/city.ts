@@ -803,16 +803,43 @@ function buildStations(streets: Streets, stops: Stop[], lines: Line[]): Station[
           x: (mouth.x + bottom.x) / 2, y: (mouth.y + bottom.y) / 2,
           angle: shaftAngle, hl: run / 2, hw: STATION.shaftWidth / 2,
         },
-        // The corridor from the foot of the stairs in to the platform. It is
-        // at platform level throughout and does NOT punch through the road,
-        // which is what lets the stairs stand on the pavement instead of in
-        // the middle of the carriageway.
-        passage: {
-          x: (bottom.x + s.x) / 2, y: (bottom.y + s.y) / 2,
-          angle: Math.atan2(s.y - bottom.y, s.x - bottom.x),
-          hl: Math.hypot(s.x - bottom.x, s.y - bottom.y) / 2 + 1,
-          hw: STATION.passageWidth / 2,
-        },
+        /**
+         * The corridor from the foot of the stairs in to the PLATFORM — and it
+         * stops there, at the platform edge, rather than carrying on to the
+         * middle of the station. Run all the way to the stop it drove straight
+         * through the track bed and out the far side, so the tunnel appeared
+         * to cut across the rails.
+         *
+         * It is at platform level throughout and does NOT punch through the
+         * road, which is what lets the stairs stand on the pavement instead of
+         * in the middle of the carriageway.
+         */
+        passage: (() => {
+          /**
+           * The corridor runs from the foot of the stairs to a point ON A
+           * PLATFORM, chosen directly rather than by backing off from the
+           * middle of the station.
+           *
+           * Two earlier attempts both ended over the rails. Backing off a
+           * fixed distance along the corridor fails when the stairs come in at
+           * an angle, because most of that distance is spent travelling ALONG
+           * the platform rather than away from the track. Solving for the
+           * across-component fails when the stairs arrive on the station's
+           * centre line, because then no distance along that line clears
+           * anything. Naming the destination has neither problem.
+           */
+          const nx = Math.sin(-angle), ny = Math.cos(-angle);
+          const off = (bottom.x - s.x) * nx + (bottom.y - s.y) * ny;
+          const side = off >= 0 ? 1 : -1;
+          const reach2 = trackHalf + STATION.platform * 0.5;
+          const end = { x: s.x + nx * reach2 * side, y: s.y + ny * reach2 * side };
+          return {
+            x: (bottom.x + end.x) / 2, y: (bottom.y + end.y) / 2,
+            angle: Math.atan2(end.y - bottom.y, end.x - bottom.x),
+            hl: Math.max(2, Math.hypot(end.x - bottom.x, end.y - bottom.y) / 2 + 1),
+            hw: STATION.passageWidth / 2,
+          };
+        })(),
       });
     }
   }

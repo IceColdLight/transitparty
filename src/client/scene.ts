@@ -23,15 +23,8 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { BODIES, CITY, LANES, LEVELS, PLATFORM, type ModeId } from '../shared/constants.js';
 import { platformAt } from '../shared/streets.js';
-import { inRect } from '../shared/stations.js';
+import { VIADUCT_CLEARANCE, footprintsOf, hash2, viaductLegs } from '../shared/plots.js';
 import type { City, PlayerState, Vehicle } from '../shared/types.js';
-
-/** Stable pseudo-randomness for a point, so buildings vary and never shimmer. */
-function hash2(x: number, y: number): number {
-  let h = (Math.imul(Math.round(x), 73856093) ^ Math.imul(Math.round(y), 19349663)) >>> 0;
-  h = Math.imul(h ^ (h >>> 15), 2246822507);
-  return ((h ^ (h >>> 13)) >>> 0) / 4294967296;
-}
 
 const SKY = 0x9fb3c8;
 /** You can see to the end of the street. That is the point. */
@@ -151,66 +144,18 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
   // ── blocks, as instanced boxes. One block is not one building: it is split
   //    into footprints on a small grid, which is what makes a street read as a
   //    street rather than a canyon between two slabs.
-  /**
-   * Rail runs at street level on its own alignment, so the buildings get out
-   * of its way. Without this the metro visibly drives through the middle of
-   * office blocks — which the top-down view could shrug off and a first-person
-   * one absolutely cannot. It is presentation only: nothing collides with a
-   * building anyway, since walking is confined to the streets.
-   */
-  const railSegs: { ax: number; ay: number; bx: number; by: number }[] = [];
-  for (const line of city.lines) {
-    if (line.mode !== 'metro' && line.mode !== 'train') continue;
-    for (let i = 0; i + 1 < line.stops.length; i++) {
-      const a = city.stops[line.stops[i]], b = city.stops[line.stops[i + 1]];
-      railSegs.push({ ax: a.x, ay: a.y, bx: b.x, by: b.y });
-    }
-  }
-  /**
-   * Stations get cleared too, and by their own footprint rather than by the
-   * rail corridor's — a hall is much wider than the track it serves, so a
-   * tower block could stand squarely inside an elevated station.
-   */
-  const inStation = (x: number, y: number, r: number) =>
-    city.stations.some((st) => inRect(st.hall, x, y, r) || inRect(st.passage, x, y, r));
+  const CLEARANCE = VIADUCT_CLEARANCE;
+  const railSegs = viaductLegs(city);
 
-  const CLEARANCE = 15;
-  const onRail = (x: number, y: number, r: number) => {
-    for (const s2 of railSegs) {
-      const dx = s2.bx - s2.ax, dy = s2.by - s2.ay;
-      const len2 = dx * dx + dy * dy || 1;
-      const u = Math.max(0, Math.min(1, ((x - s2.ax) * dx + (y - s2.ay) * dy) / len2));
-      const px = s2.ax + dx * u, py = s2.ay + dy * u;
-      if (Math.hypot(x - px, y - py) < CLEARANCE + r) return true;
-    }
-    return false;
-  };
-
-  const boxes: { x: number; z: number; w: number; d: number; h: number; tone: number }[] = [];
-  const parks: { x: number; z: number; w: number; d: number }[] = [];
-  for (const b of city.blocks) {
-    if (b.park) { parks.push({ x: b.x + b.w / 2, z: b.y + b.h / 2, w: b.w, d: b.h }); continue; }
-    const cols = Math.max(1, Math.min(4, Math.round(b.w / 78)));
-    const rows = Math.max(1, Math.min(4, Math.round(b.h / 78)));
-    const cw = b.w / cols, ch = b.h / rows;
-    for (let cx = 0; cx < cols; cx++) {
-      for (let cy = 0; cy < rows; cy++) {
-        const gx = b.x + cx * cw, gy = b.y + cy * ch;
-        const n = hash2(gx, gy);
-        const inset = 1 + n * 2.5;
-        const w = cw - inset * 2, d = ch - inset * 2;
-        if (w < 6 || d < 6) continue;
-        const cx2 = gx + inset + w / 2, cy2 = gy + inset + d / 2;
-        if (onRail(cx2, cy2, Math.min(w, d) / 2)) continue;
-        if (inStation(cx2, cy2, Math.min(w, d) / 2)) continue;
-        boxes.push({
-          x: gx + inset + w / 2, z: gy + inset + d / 2, w, d,
-          h: 11 + n * 34 + hash2(gy, gx) * 12,
-          tone: n,
-        });
-      }
-    }
-  }
+  /**
+   * What stands on each block is decided in shared/plots.ts, because a bare
+   * plot is a property of the CITY rather than of the picture: it is land the
+   * player can see and cannot walk on, and that deserves a test rather than a
+   * bug report.
+   */
+  const boxes = footprintsOf(city);
+  const parks = city.blocks.filter((bl) => bl.park)
+    .map((bl) => ({ x: bl.x + bl.w / 2, z: bl.y + bl.h / 2, w: bl.w, d: bl.h }));
 
   const buildingGeo = keep(new THREE.BoxGeometry(1, 1, 1));
   // NOT vertexColors: an InstancedMesh carries its own `instanceColor`, and
@@ -222,11 +167,11 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
   const col = new THREE.Color();
   boxes.forEach((b, i) => {
     m.makeScale(b.w, b.h, b.d);
-    m.setPosition(b.x, b.h / 2, b.z);
+    m.setPosition(b.x, b.h / 2, b.y);
     buildings.setMatrixAt(i, m);
     // A wider spread than looks sensible on paper. Narrow it and a street
     // canyon becomes one continuous grey wall with no depth to it at all.
-    const warm = hash2(b.z, b.x);
+    const warm = hash2(b.y, b.x);
     col.setHSL(0.07 + warm * 0.56, 0.05 + b.tone * 0.16, 0.34 + warm * 0.30);
     buildings.setColorAt(i, col);
   });
@@ -234,11 +179,53 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
   if (buildings.instanceColor) buildings.instanceColor.needsUpdate = true;
   scene.add(buildings);
 
+  /**
+   * Parks get a hedge round them, and the railway gets a fence.
+   *
+   * Both are land you can see and cannot walk on, and without something at the
+   * edge that is indistinguishable from an invisible wall. Walking stays
+   * confined to the streets — that is the whole basis of the pedestrian graph
+   * the route planner shares — so the answer is not to open them but to make
+   * it obvious they are shut.
+   */
   const parkMat = keep(new THREE.MeshLambertMaterial({ color: 0x2f5c37 }));
+  const hedgeMat = keep(new THREE.MeshLambertMaterial({ color: 0x24472c }));
   for (const p of parks) {
     const mesh = new THREE.Mesh(keep(new THREE.BoxGeometry(p.w, 0.25, p.d)), parkMat);
     mesh.position.set(p.x, 0.12, p.z);
     scene.add(mesh);
+    const t = 1.0, hgt = 1.15;
+    for (const [w, d, dx, dz] of [
+      [p.w, t, 0, -p.d / 2], [p.w, t, 0, p.d / 2],
+      [t, p.d, -p.w / 2, 0], [t, p.d, p.w / 2, 0],
+    ] as const) {
+      const h = new THREE.Mesh(keep(new THREE.BoxGeometry(w, hgt, d)), hedgeMat);
+      h.position.set(p.x + dx, hgt / 2, p.z + dz);
+      scene.add(h);
+    }
+  }
+
+  // A fence either side of the viaduct's land, for the same reason.
+  {
+    const posts: THREE.BufferGeometry[] = [];
+    for (const seg of railSegs) {
+      const dx = seg.bx - seg.ax, dy = seg.by - seg.ay;
+      const len = Math.hypot(dx, dy);
+      if (len < 4) continue;
+      const ang = Math.atan2(dy, dx);
+      for (const side of [-1, 1]) {
+        const g = new THREE.BoxGeometry(len, 1.3, 0.5);
+        g.translate(0, 0.65, side * CLEARANCE);
+        g.rotateY(-ang);
+        g.translate((seg.ax + seg.bx) / 2, 0, (seg.ay + seg.by) / 2);
+        posts.push(g);
+      }
+    }
+    if (posts.length) {
+      const g = mergeGeometries(posts, false)!;
+      posts.forEach((x) => x.dispose());
+      scene.add(new THREE.Mesh(keep(g), keep(new THREE.MeshLambertMaterial({ color: 0x4d4437 }))));
+    }
   }
 
   /**
@@ -392,44 +379,72 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
       if (line.mode !== 'metro' && line.mode !== 'train') continue;
       const level = LEVELS[line.mode];
       const gauge = line.mode === 'train' ? 1.5 : 1.4;
+      const body = BODIES[line.mode];
+
       for (let i = 0; i + 1 < line.stops.length; i++) {
         const a = city.stops[line.stops[i]], b = city.stops[line.stops[i + 1]];
         const la = line.lane[i], lb = line.lane[i + 1];
-        const ax = a.x + la.x, ay = a.y + la.y, bx = b.x + lb.x, by = b.y + lb.y;
-        const dx = bx - ax, dy = by - ay;
+
+        /**
+         * A railway has TWO running lines and they are not in the same place:
+         * a vehicle sits at the stop plus its lane offset TIMES ITS DIRECTION,
+         * so the up line is at +lane and the down line at -lane. Drawing the
+         * track once, at +lane, left half the service running on rails and the
+         * other half floating in mid-air.
+         */
+        for (const dir of [1, -1] as const) {
+          const ax = a.x + la.x * dir, ay = a.y + la.y * dir;
+          const bx = b.x + lb.x * dir, by = b.y + lb.y * dir;
+          const dx = bx - ax, dy = by - ay;
+          const len = Math.hypot(dx, dy);
+          if (len < 1) continue;
+          const ang = Math.atan2(dy, dx);
+          const mx = (ax + bx) / 2, my = (ay + by) / 2;
+
+          for (const side of [-1, 1]) {
+            const g = new THREE.BoxGeometry(len, 0.16, 0.12);
+            g.translate(0, level + 0.08, side * gauge);
+            g.rotateY(-ang);
+            g.translate(mx, 0, my);
+            rail.push(g);
+          }
+          for (let d = -len / 2 + 1; d < len / 2; d += 3.2) {
+            const g = new THREE.BoxGeometry(0.5, 0.14, gauge * 2.6);
+            g.translate(d, level - 0.02, 0);
+            g.rotateY(-ang);
+            g.translate(mx, 0, my);
+            sleeper.push(g);
+          }
+        }
+
+        /**
+         * The bore and the viaduct deck go on the CENTRE LINE and are wide
+         * enough to hold both tracks. Built around one direction's rails, the
+         * tunnel sat off to one side with the other line running through its
+         * wall and out into the soil.
+         */
+        const dx = b.x - a.x, dy = b.y - a.y;
         const len = Math.hypot(dx, dy);
         if (len < 1) continue;
         const ang = Math.atan2(dy, dx);
-        const mx = (ax + bx) / 2, my = (ay + by) / 2;
+        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        const reach = Math.max(Math.hypot(la.x, la.y), Math.hypot(lb.x, lb.y));
+        const span = (reach + body.w / 2 + 1.8) * 2;
 
         const place = (
-          into: THREE.BufferGeometry[], w: number, h: number, d: number,
-          off: number, y: number,
+          into: THREE.BufferGeometry[], w: number, h: number, d: number, y: number,
         ) => {
           const g = new THREE.BoxGeometry(w, h, d);
-          g.translate(0, y, off);
+          g.translate(0, y, 0);
           g.rotateY(-ang);
           g.translate(mx, 0, my);
           into.push(g);
         };
 
-        // two rails, and sleepers under them
-        for (const side of [-1, 1]) place(rail, len, 0.16, 0.12, side * gauge, level + 0.08);
-        const every = 3.2;
-        for (let d = -len / 2 + 1; d < len / 2; d += every) {
-          const g = new THREE.BoxGeometry(0.5, 0.14, gauge * 2.6);
-          g.translate(d, level - 0.02, 0);
-          g.rotateY(-ang);
-          g.translate(mx, 0, my);
-          sleeper.push(g);
-        }
-
         if (line.mode === 'metro') {
-          // the bore, seen from inside
-          place(tunnel, len, 7.2, 9.5, 0, level + 3.2);
+          place(tunnel, len, body.h + 2.6, span, level + (body.h + 2.6) / 2 - 0.5);
         } else {
-          // a viaduct deck, and legs to hold it up
-          place(deckGeo, len, 1.1, 7.2, 0, level - 0.75);
+          place(deckGeo, len, 1.1, span, level - 0.75);
           for (let d = -len / 2 + 8; d < len / 2; d += 34) {
             const g = new THREE.BoxGeometry(2.2, level, 2.2);
             g.translate(d, level / 2 - 1.2, 0);

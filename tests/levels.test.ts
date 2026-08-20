@@ -124,6 +124,55 @@ check('the stairs are not so steep you would need a jump',
   Math.abs(st.level) / (st.shaft.hl * 2) < 0.75,
   `gradient ${(Math.abs(st.level) / (st.shaft.hl * 2)).toFixed(2)}`);
 
+describe('the station and its track agree');
+
+/**
+ * A railway has TWO running lines: a vehicle sits at its stop plus its lane
+ * offset TIMES ITS DIRECTION, so the up line is at +lane and the down line at
+ * -lane. Everything built around one of them — the rails, the tunnel bore, the
+ * viaduct deck — left the other half of the service running on nothing.
+ */
+{
+  let outside = 0, sampled = 0, worstBore = 0;
+  for (let t = 0; t < 200; t += 4) {
+    for (const v of allVehicles(city, t)) {
+      const mode = city.lines[v.line].mode;
+      if (mode !== 'metro' && mode !== 'train') continue;
+      const line = city.lines[v.line];
+      const i = Math.max(0, line.stops.indexOf(v.atStop >= 0 ? v.atStop : v.nextStop));
+      const reach = Math.hypot(line.lane[i].x, line.lane[i].y);
+      // the bore is built to this half-span; the vehicle must fit inside it
+      const span = reach + BODIES[mode].w / 2 + 1.8;
+      const need = reach + BODIES[mode].w / 2;
+      sampled++;
+      worstBore = Math.max(worstBore, need - span);
+      if (need > span) outside++;
+    }
+  }
+  check('both running lines fit inside their tunnel or viaduct',
+    outside === 0, `${outside} of ${sampled} samples outside, worst by ${worstBore.toFixed(2)}m`);
+}
+
+/**
+ * And the corridor from the stairs arrives at a PLATFORM, not over the rails.
+ * Two earlier versions ended over the track — one backed off a fixed distance
+ * along a corridor that mostly runs parallel to the platform, the other solved
+ * for the across-component and had nothing to solve when the stairs land on
+ * the station's centre line.
+ */
+{
+  let overTrack = 0;
+  for (const s2 of city.stations) {
+    const c = Math.cos(s2.passage.angle), sn = Math.sin(s2.passage.angle);
+    const end = { x: s2.passage.x + c * s2.passage.hl, y: s2.passage.y + sn * s2.passage.hl };
+    const dx = end.x - s2.hall.x, dy = end.y - s2.hall.y;
+    const across = Math.abs(dx * Math.sin(-s2.hall.angle) + dy * Math.cos(-s2.hall.angle));
+    if (across < s2.trackHalf) overTrack++;
+  }
+  check('every corridor from the stairs comes out on a platform',
+    overTrack === 0, `${overTrack} of ${city.stations.length} ended over the track`);
+}
+
 describe('boarding from the platform');
 
 let boarded: string | null = null;
