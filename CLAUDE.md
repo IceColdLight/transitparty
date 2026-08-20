@@ -571,8 +571,13 @@ about where any of them GO.
 
 Two things enforce it and both are load-bearing rather than atmospheric:
 
-- **Fog.** You can see to the end of the street and no further. It is the
-  reason the network can be hidden at all.
+- **Fog.** It is a design tool, not weather: the reason the network has to be
+  looked up and remembered rather than glanced at. It used to close in at 340m,
+  which is two blocks and reads as murk. It has been opened up to 720m because
+  the wayfinding around it got richer — every street is named and the map no
+  longer shows you where you are — so the city is now something you read rather
+  than something you squint through. You can see across a few junctions; you
+  still cannot see where a line GOES, which is the only property that matters.
 - **The map is an object.** A folded card you hold up in front of your face on
   TAB and put away when you let go. It costs you most of your view of the
   street, which is the right price for knowing where the lines go, and it is

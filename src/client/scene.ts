@@ -26,10 +26,24 @@ import { platformAt } from '../shared/streets.js';
 import { VIADUCT_CLEARANCE, footprintsOf, hash2, viaductLegs } from '../shared/plots.js';
 import type { City, PlayerState, Vehicle } from '../shared/types.js';
 
-const SKY = 0x9fb3c8;
-/** You can see to the end of the street. That is the point. */
-export const FOG_NEAR = 60;
-export const FOG_FAR = 340;
+/** Horizon and zenith. The fog takes the horizon colour so distance dissolves into it. */
+const SKY_LOW = 0xa8c8e8;
+const SKY_HIGH = 0x4f92d8;
+
+/**
+ * How far you can see.
+ *
+ * Fog is a design tool here, not weather: it is the reason the network has to
+ * be looked up and remembered rather than glanced at. It used to close in at
+ * 340m, which was a couple of blocks and read as murk.
+ *
+ * It has been opened up because the wayfinding around it got richer — every
+ * street is named and the map no longer shows you where you are, so the city
+ * is now something you read rather than something you squint through. You can
+ * see across a few junctions; you still cannot see where a line GOES.
+ */
+export const FOG_NEAR = 180;
+export const FOG_FAR = 720;
 
 /**
  * Painting a station sign, given a 2D context to paint it on. The context is
@@ -82,16 +96,57 @@ export type SceneOpts = { sign?: (text: string, sub: string[], color: string) =>
 
 export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
   const makeSign = opts.sign ?? browserSign;
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(SKY);
-  scene.fog = new THREE.Fog(SKY, FOG_NEAR, FOG_FAR);
+  const junk: (THREE.BufferGeometry | THREE.Material | THREE.Texture)[] = [];
+  const keepEarly = <T extends THREE.BufferGeometry | THREE.Material>(x: T) => {
+    junk.push(x); return x;
+  };
 
-  scene.add(new THREE.HemisphereLight(0xdce8f5, 0x2a3038, 2.1));
-  const sun = new THREE.DirectionalLight(0xffe9cf, 1.5);
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(SKY_LOW, FOG_NEAR, FOG_FAR);
+
+  /**
+   * A real sky: a gradient from a pale horizon to a proper blue overhead,
+   * painted on the inside of a sphere. A shader rather than a texture so it
+   * needs no canvas, which is what lets the headless renderer draw it too.
+   */
+  {
+    const sky = new THREE.Mesh(
+      keepEarly(new THREE.SphereGeometry(3000, 24, 12)),
+      keepEarly(new THREE.ShaderMaterial({
+        side: THREE.BackSide,
+        depthWrite: false,
+        uniforms: {
+          low: { value: new THREE.Color(SKY_LOW) },
+          high: { value: new THREE.Color(SKY_HIGH) },
+        },
+        vertexShader: `
+          varying vec3 vDir;
+          void main() {
+            vDir = normalize(position);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }`,
+        fragmentShader: `
+          uniform vec3 low;
+          uniform vec3 high;
+          varying vec3 vDir;
+          void main() {
+            float t = clamp(vDir.y * 1.15, 0.0, 1.0);
+            gl_FragColor = vec4(mix(low, high, pow(t, 0.85)), 1.0);
+          }`,
+      })),
+    );
+    sky.renderOrder = -1;
+    scene.add(sky);
+  }
+
+  scene.add(new THREE.HemisphereLight(0xe6f0fb, 0x39424e, 2.0));
+  const sun = new THREE.DirectionalLight(0xfff0d8, 1.7);
   sun.position.set(-0.5, 1, 0.35);
   scene.add(sun);
+  const fill = new THREE.DirectionalLight(0xbcd4ee, 0.5);
+  fill.position.set(0.6, 0.4, -0.7);
+  scene.add(fill);
 
-  const junk: (THREE.BufferGeometry | THREE.Material | THREE.Texture)[] = [];
   const keep = <T extends THREE.BufferGeometry | THREE.Material | THREE.Texture>(x: T) => {
     junk.push(x); return x;
   };
@@ -157,37 +212,97 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
   const parks = city.blocks.filter((bl) => bl.park)
     .map((bl) => ({ x: bl.x + bl.w / 2, z: bl.y + bl.h / 2, w: bl.w, d: bl.h }));
 
-  const buildingGeo = keep(new THREE.BoxGeometry(1, 1, 1));
-  // NOT vertexColors: an InstancedMesh carries its own `instanceColor`, and
-  // asking the shader for a per-vertex colour attribute that the geometry does
-  // not have paints every building pure black.
-  const buildingMat = keep(new THREE.MeshLambertMaterial({ color: 0xffffff }));
-  const buildings = new THREE.InstancedMesh(buildingGeo, buildingMat, boxes.length);
-  const m = new THREE.Matrix4();
-  const col = new THREE.Color();
-  boxes.forEach((b, i) => {
-    m.makeScale(b.w, b.h, b.d);
-    m.setPosition(b.x, b.h / 2, b.y);
-    buildings.setMatrixAt(i, m);
-    // A wider spread than looks sensible on paper. Narrow it and a street
-    // canyon becomes one continuous grey wall with no depth to it at all.
-    const warm = hash2(b.y, b.x);
-    col.setHSL(0.07 + warm * 0.56, 0.05 + b.tone * 0.16, 0.34 + warm * 0.30);
-    buildings.setColorAt(i, col);
-  });
-  buildings.instanceMatrix.needsUpdate = true;
-  if (buildings.instanceColor) buildings.instanceColor.needsUpdate = true;
-  scene.add(buildings);
-
   /**
-   * Parks get a hedge round them, and the railway gets a fence.
+   * A building is four instanced pieces rather than one box: a plinth at the
+   * pavement, the mass, a cap on the roof, and a run of floor bands up the
+   * face. Some get a setback tower on top so the skyline is not a row of
+   * identical slabs.
    *
-   * Both are land you can see and cannot walk on, and without something at the
-   * edge that is indistinguishable from an invisible wall. Walking stays
-   * confined to the streets — that is the whole basis of the pedestrian graph
-   * the route planner shares — so the answer is not to open them but to make
-   * it obvious they are shut.
+   * All of it is instanced, so the whole city's built fabric is five draw
+   * calls however many blocks it has — and the bands, which do most of the
+   * work of stopping a wall looking like a wall, are the cheapest part of it.
    */
+  const unit = keep(new THREE.BoxGeometry(1, 1, 1));
+  const massMat = keep(new THREE.MeshLambertMaterial({ color: 0xffffff }));
+  const trimMat = keep(new THREE.MeshLambertMaterial({ color: 0xffffff }));
+  // Glazing, not liquorice. At 1.5m deep and near-black the bands turned every
+  // façade into a humbug; a slim, dim strip reads as a row of windows instead.
+  const bandMat = keep(new THREE.MeshLambertMaterial({ color: 0x3f4c5e }));
+
+  type Piece = { m: THREE.Matrix4; c: THREE.Color };
+  const mass: Piece[] = [], trim: Piece[] = [], bands: THREE.Matrix4[] = [];
+  const col = new THREE.Color();
+  const tmp = new THREE.Matrix4();
+
+  /** Masonry, not noise: a handful of plausible façade colours, picked per plot. */
+  const PALETTE: [number, number, number][] = [
+    [0.09, 0.22, 0.62],   // warm sandstone
+    [0.04, 0.34, 0.44],   // brick
+    [0.58, 0.06, 0.68],   // pale blue-grey stone
+    [0.11, 0.10, 0.74],   // cream render
+    [0.45, 0.09, 0.52],   // weathered green-grey
+    [0.02, 0.16, 0.38],   // dark brick
+  ];
+
+  for (const b of boxes) {
+    const pick = PALETTE[Math.floor(hash2(b.y, b.x) * PALETTE.length) % PALETTE.length];
+    const shade = 0.88 + b.tone * 0.24;
+    col.setHSL(pick[0], pick[1], Math.min(0.82, pick[2] * shade));
+
+    const setback = b.tone > 0.62 && b.h > 26;
+    const mainH = setback ? b.h * 0.68 : b.h;
+
+    tmp.makeScale(b.w, mainH, b.d);
+    tmp.setPosition(b.x, mainH / 2, b.y);
+    mass.push({ m: tmp.clone(), c: col.clone() });
+
+    // plinth: a wider, darker storey at street level
+    const dark = col.clone().multiplyScalar(0.72);
+    tmp.makeScale(b.w + 0.7, 2.6, b.d + 0.7);
+    tmp.setPosition(b.x, 1.3, b.y);
+    trim.push({ m: tmp.clone(), c: dark });
+
+    // roof cap
+    tmp.makeScale(b.w + 0.5, 0.7, b.d + 0.5);
+    tmp.setPosition(b.x, mainH + 0.35, b.y);
+    trim.push({ m: tmp.clone(), c: dark });
+
+    if (setback) {
+      const tw = b.w * 0.6, td = b.d * 0.6, th = b.h - mainH;
+      tmp.makeScale(tw, th, td);
+      tmp.setPosition(b.x, mainH + th / 2, b.y);
+      mass.push({ m: tmp.clone(), c: col.clone() });
+      tmp.makeScale(tw + 0.4, 0.6, td + 0.4);
+      tmp.setPosition(b.x, mainH + th + 0.3, b.y);
+      trim.push({ m: tmp.clone(), c: dark });
+    }
+
+    // floor bands, which read as windows from any distance worth reading at
+    const storey = 4.2;
+    const floors = Math.min(9, Math.floor((mainH - 5) / storey));
+    for (let f = 0; f < floors; f++) {
+      tmp.makeScale(b.w + 0.06, 0.62, b.d + 0.06);
+      tmp.setPosition(b.x, 4.6 + f * storey, b.y);
+      bands.push(tmp.clone());
+    }
+  }
+
+  const instanced = (pieces: Piece[], mat: THREE.Material) => {
+    const mesh = new THREE.InstancedMesh(unit, mat, pieces.length);
+    pieces.forEach((p, i) => { mesh.setMatrixAt(i, p.m); mesh.setColorAt(i, p.c); });
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    scene.add(mesh);
+  };
+  instanced(mass, massMat);
+  instanced(trim, trimMat);
+  {
+    const mesh = new THREE.InstancedMesh(unit, bandMat, bands.length);
+    bands.forEach((m2, i) => mesh.setMatrixAt(i, m2));
+    mesh.instanceMatrix.needsUpdate = true;
+    scene.add(mesh);
+  }
+
   const parkMat = keep(new THREE.MeshLambertMaterial({ color: 0x2f5c37 }));
   const hedgeMat = keep(new THREE.MeshLambertMaterial({ color: 0x24472c }));
   for (const p of parks) {
