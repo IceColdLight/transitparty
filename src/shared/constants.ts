@@ -66,6 +66,12 @@ export const CITY = {
    * river.ts for why the city needed a chokepoint in the first place.
    */
   bridgeRadius: 85,
+  /**
+   * Half the width of the water. The river is a hole in the ground with a quay
+   * wall down each side, so this is also how much land it takes: nothing is
+   * built inside it, and nothing walks across it except on a bridge.
+   */
+  channel: 48,
   bridges: 3,
 };
 

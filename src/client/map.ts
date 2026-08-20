@@ -15,7 +15,7 @@
  * scale.
  */
 import { CITY, MODES, WALK, type ModeId } from '../shared/constants.js';
-import { nearestOnRiver } from '../shared/river.js';
+import { directionAt, inChannel } from '../shared/river.js';
 import { warp } from '../shared/schematic.js';
 import type { City, PlayerState, Vehicle } from '../shared/types.js';
 
@@ -111,14 +111,30 @@ export function drawMap(
     const line = (fixed: number, vertical: boolean, name: string) => {
       const pts: { x: number; y: number }[] = [];
       const span = vertical ? CITY.height : CITY.width;
-      for (let t = 0; t <= 12; t++) {
-        const along = (t / 12) * span;
-        pts.push(P(vertical ? { x: fixed, y: along } : { x: along, y: fixed }));
+      /**
+       * Sampled finely enough to see the water. A street that runs into the
+       * river STOPS there — the diagram said otherwise, drawing every street
+       * clean across the channel, and a map that shows a road where there is
+       * none is worse than a map with no roads on it: the whole reason the
+       * grid is on the sheet is so a player can plan a walk with it.
+       */
+      const N = 90;
+      for (let t = 0; t <= N; t++) {
+        const along = (t / N) * span;
+        const w = vertical ? { x: fixed, y: along } : { x: along, y: fixed };
+        pts.push(inChannel(city.river, w, CITY.channel, CITY.bridgeRadius)
+          ? { x: NaN, y: NaN }
+          : P(w));
       }
       ctx.strokeStyle = 'rgba(255,255,255,0.06)';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      pts.forEach((q, i2) => (i2 === 0 ? ctx.moveTo(q.x, q.y) : ctx.lineTo(q.x, q.y)));
+      let pen = false;
+      for (const q of pts) {
+        if (Number.isNaN(q.x)) { pen = false; continue; }
+        if (pen) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y);
+        pen = true;
+      }
       ctx.stroke();
 
       ctx.font = '700 12px system-ui, sans-serif';
@@ -127,6 +143,7 @@ export function drawMap(
       let since = 1e9;
       for (let i2 = 1; i2 < pts.length; i2++) {
         const a2 = pts[i2 - 1], b2 = pts[i2];
+        if (Number.isNaN(a2.x) || Number.isNaN(b2.x)) { since = 1e9; continue; }
         const seg = Math.hypot(b2.x - a2.x, b2.y - a2.y);
         since += seg;
         if (since < 300) continue;
@@ -166,8 +183,15 @@ export function drawMap(
   // places anything gets over, so they should look like crossings.
   for (const b of city.river.bridges) {
     const q = P(b);
-    const near = P(nearestOnRiver(city.river, { x: b.x + 1, y: b.y }));
-    const a = Math.atan2(q.y - near.y, q.x - near.x) + Math.PI / 2;
+    /**
+     * The rung is drawn as a segment up the local y axis, so rotating by the
+     * river's own heading lays it ACROSS the water. The old code added a right
+     * angle on top of a heading it had already taken perpendicular, and drew
+     * every bridge lying along the channel instead of over it.
+     */
+    const d = directionAt(city.river, b);
+    const ahead = P({ x: b.x + d.x * 40, y: b.y + d.y * 40 });
+    const a = Math.atan2(ahead.y - q.y, ahead.x - q.x);
     ctx.save();
     ctx.translate(q.x, q.y);
     ctx.rotate(a);

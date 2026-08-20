@@ -163,27 +163,121 @@ function placeAtCrossings(r: Rng, s: Streets, poly: Pt[], spacing: number): Pt[]
  * water rather than placed where they would be convenient, because a crossing
  * you have to go out of your way for is the entire point.
  */
-function makeRiver(r: Rng): River {
+function makeRiver(r: Rng, s: Streets): River {
   const vertical = r() < 0.5;
-  const a: Pt = vertical
-    ? { x: range(r, CITY.width * 0.3, CITY.width * 0.7), y: -80 }
-    : { x: -80, y: range(r, CITY.height * 0.3, CITY.height * 0.7) };
-  const b: Pt = vertical
-    ? { x: range(r, CITY.width * 0.3, CITY.width * 0.7), y: CITY.height + 80 }
-    : { x: CITY.width + 80, y: range(r, CITY.height * 0.3, CITY.height * 0.7) };
+  const across = vertical ? s.xs : s.ys;
+  const along = vertical ? s.ys : s.xs;
+  const span = vertical ? CITY.height : CITY.width;
+  const width = vertical ? CITY.width : CITY.height;
 
-  const poly: Pt[] = [];
-  const dx = b.x - a.x, dy = b.y - a.y;
-  const L = Math.hypot(dx, dy) || 1;
-  const nx = -dy / L, ny = dx / L;
-  const h1 = range(r, -1, 1), h2 = range(r, -0.7, 0.7);
-  for (let i = 0; i <= 40; i++) {
-    const t = i / 40;
-    const off = 300 * (h1 * Math.sin(Math.PI * t) + h2 * Math.sin(2 * Math.PI * t));
-    poly.push({ x: a.x + dx * t + nx * off, y: a.y + dy * t + ny * off });
+  /**
+   * Where the water will fit: the middle of a gap between two streets wide
+   * enough to take the channel and still leave a kerb on both sides.
+   */
+  const room = 2 * CITY.channel + s.width + 16;
+  const gaps = (lines: number[]) => {
+    const out: number[] = [];
+    for (let i = 0; i + 1 < lines.length; i++) {
+      if (lines[i + 1] - lines[i] >= room) out.push((lines[i] + lines[i + 1]) / 2);
+    }
+    return out;
+  };
+  const lanes = gaps(across).filter((v) => v > width * 0.24 && v < width * 0.76);
+  const turns = gaps(along).filter((u) => u > span * 0.25 && u < span * 0.75);
+
+  const pts: Pt[] = [];
+  const put = (u: number, v: number) => pts.push(vertical ? { x: v, y: u } : { x: u, y: v });
+
+  if (lanes.length < 2 || turns.length < 1) {
+    // No room to meander. Straight down the middle of the widest gap there is.
+    const all = gaps(across);
+    const v = all.length ? all[Math.floor(all.length / 2)] : width / 2;
+    put(-80, v);
+    put(span + 80, v);
+    return { poly: round(pts), bridges: [] };
   }
 
-  return { poly, bridges: [] };
+  /**
+   * A staircase down the gaps, never along a street.
+   *
+   * The river used to be a smooth diagonal drawn without reference to
+   * anything, which meant it ran straight through the grid: a dozen streets
+   * ended in the middle of the water, the pavements carried on across it, and
+   * no road anywhere ran ALONG the bank. A city on a river has an embankment
+   * on both sides — that is the most useful road in it — so the water goes
+   * between two streets and those two streets become the quays.
+   *
+   * The legs across are what give it a shape worth navigating: they run down
+   * the gaps too, so they cut the perpendicular streets rather than lying on
+   * one.
+   */
+  let k = Math.floor(range(r, 0, lanes.length));
+  put(-80, lanes[k]);
+  const bends = Math.min(turns.length, 1 + Math.floor(range(r, 0, 2.2)));
+  const picked: number[] = [];
+  for (let i = 0; i < bends; i++) {
+    const u = turns[Math.floor(range(r, 0, turns.length))];
+    if (picked.some((p) => Math.abs(p - u) < span * 0.15)) continue;
+    picked.push(u);
+  }
+  picked.sort((p, q) => p - q);
+  for (const u of picked) {
+    const step = r() < 0.5 ? -1 : 1;
+    const next = Math.max(0, Math.min(lanes.length - 1, k + step * (1 + Math.floor(range(r, 0, 2)))));
+    if (next === k) continue;
+    put(u, lanes[k]);
+    put(u, lanes[next]);
+    k = next;
+  }
+  put(span + 80, lanes[k]);
+  return { poly: round(pts), bridges: [] };
+}
+
+/**
+ * Square corners, rounded off and resampled.
+ *
+ * Two reasons, and the second is the one that bites. A river does not turn a
+ * right angle; and the channel is drawn by offsetting this line sideways, so
+ * at a square corner the two offsets do not meet and the bank comes out with a
+ * notch cut in it. An arc a corner's width across solves both.
+ */
+function round(pts: Pt[]): Pt[] {
+  const R = 70, ARC = 6;
+  const out: Pt[] = [pts[0]];
+  for (let i = 1; i + 1 < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], c = pts[i + 1];
+    const la = dist(a, b), lc = dist(b, c);
+    const ra = Math.min(R, la * 0.45), rc = Math.min(R, lc * 0.45);
+    const rad = Math.min(ra, rc);
+    const p0 = { x: b.x + (a.x - b.x) / la * rad, y: b.y + (a.y - b.y) / la * rad };
+    const p1 = { x: b.x + (c.x - b.x) / lc * rad, y: b.y + (c.y - b.y) / lc * rad };
+    out.push(p0);
+    for (let k = 1; k < ARC; k++) {
+      const t = k / ARC;
+      // Quadratic through the corner: near enough an arc at this scale.
+      out.push({
+        x: (1 - t) * (1 - t) * p0.x + 2 * (1 - t) * t * b.x + t * t * p1.x,
+        y: (1 - t) * (1 - t) * p0.y + 2 * (1 - t) * t * b.y + t * t * p1.y,
+      });
+    }
+    out.push(p1);
+  }
+  out.push(pts[pts.length - 1]);
+
+  // Resample: the bank is drawn from per-point normals, and a 900m straight
+  // with a point at each end has nowhere to put one.
+  const fine: Pt[] = [out[0]];
+  for (let i = 1; i < out.length; i++) {
+    const d = dist(out[i - 1], out[i]);
+    const n = Math.max(1, Math.round(d / 30));
+    for (let k = 1; k <= n; k++) {
+      fine.push({
+        x: out[i - 1].x + (out[i].x - out[i - 1].x) * (k / n),
+        y: out[i - 1].y + (out[i].y - out[i - 1].y) * (k / n),
+      });
+    }
+  }
+  return fine;
 }
 
 /** Spread the bridges out along the water, choosing from the street crossings. */
@@ -224,7 +318,7 @@ export function generateNet(seed: number): {
 } {
   const r = rng(seed);
   const streets = makeStreets(r);
-  const river = makeRiver(r);
+  const river = makeRiver(r, streets);
   // Bridges go where streets already meet the water, then get spread out.
   river.bridges = chooseBridges(bridgeSites(streets, river), CITY.bridges);
 
@@ -580,7 +674,7 @@ export function generateNet(seed: number): {
   /** A line that gets over the water, built as two corridors meeting on a bridge. */
   const addCrossing = (mode: ModeId, bridge: Pt, bend: number) => {
     const onRoad = mode === 'bus' || mode === 'tram';
-    for (let k = 0; k < 20; k++) {
+    for (let k = 0; k < 45; k++) {
       const a = onBank(1), b = onBank(-1);
       if (!a || !b) continue;
       /**
@@ -1212,7 +1306,7 @@ function fallbackRace(net: Net, r: Rng): City['par'] & { origin: number; destina
  */
 export function buildCity(seed: number): City {
   let last: ReturnType<typeof generateNet> | null = null;
-  for (let attempt = 0; attempt < 24; attempt++) {
+  for (let attempt = 0; attempt < 40; attempt++) {
     const s = (Math.imul(seed, 2654435761) + attempt * 40503) >>> 0;
     const net = generateNet(s);
     last = net;

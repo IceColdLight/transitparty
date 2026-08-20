@@ -19,7 +19,7 @@
  */
 import { CITY, PLATFORM } from './constants.js';
 import { type Rng, pick, range } from './rng.js';
-import { type River, illegalCrossing } from './river.js';
+import { type River, illegalCrossing, inChannel } from './river.js';
 
 export type Pt = { x: number; y: number };
 
@@ -63,7 +63,15 @@ export function makeStreets(r: Rng): Streets {
     // the variation is also what gives some blocks a long frontage worth
     // running a tram down.
     while (out[out.length - 1] < extent - 200) out.push(out[out.length - 1] + range(r, 145, 290));
-    out.push(extent - 40);
+    /**
+     * The last street, but only if there is room for it. Pushed unconditionally
+     * it could land BEHIND its neighbour — the loop stops within 200m of the
+     * edge and the final line is fixed at 40m from it — which left the list
+     * unsorted. Nothing looks at the order until something does: the footway
+     * runs between junctions are built by walking the list in pairs, and a
+     * pair in the wrong order is a strip of pavement of negative length.
+     */
+    if (extent - 40 - out[out.length - 1] >= 120) out.push(extent - 40);
     return out;
   };
   /**
@@ -231,7 +239,12 @@ export function buildWalkGraph(s: Streets, river: River, stops: Pt[]): WalkGraph
   const stopNode = stops.map((p) => { pos.push({ x: p.x, y: p.y }); return pos.length - 1; });
 
   const adj: { to: number; w: number }[][] = pos.map(() => []);
+  // A junction can land in the middle of the water: the grid is laid without
+  // reference to the river. It is not somewhere anybody can stand, so it is
+  // not somewhere a route may go through.
+  const dry = pos.map((p) => !inChannel(river, p, CITY.channel, CITY.bridgeRadius));
   const link = (i: number, j: number) => {
+    if (!dry[i] || !dry[j]) return;
     if (illegalCrossing(river, pos[i], pos[j], CITY.bridgeRadius)) return;
     const w = Math.hypot(pos[i].x - pos[j].x, pos[i].y - pos[j].y);
     adj[i].push({ to: j, w });

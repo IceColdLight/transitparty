@@ -239,10 +239,58 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
    * across the river and out the other side, and the fence beside a viaduct
    * did the same.
    */
+  const CHANNEL = CITY.channel;
   const overWater = (x: number, y: number) => {
-    if (nearestOnRiver(city.river, { x, y }).dist > 42) return false;
+    if (nearestOnRiver(city.river, { x, y }).dist > CHANNEL - 6) return false;
     return !city.river.bridges.some((b) => Math.hypot(b.x - x, b.y - y) < CITY.bridgeRadius);
   };
+
+  /**
+   * The channel, as one polygon per stretch of open water between bridges.
+   *
+   * The river was drawn as a ribbon of blue sunk a metre below the street and
+   * then the ground was laid straight over the top of it, so the only place it
+   * existed was the map — which is a strange thing for the feature the whole
+   * game's route planning rests on. The ground gets a hole instead, and what
+   * is under the hole is water.
+   *
+   * Split at the bridges, because a bridge is where the ground carries on.
+   */
+  const channels: { x: number; y: number }[][] = (() => {
+    const pts = city.river.poly;
+    const fine: { x: number; y: number; nx: number; ny: number }[] = [];
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const a = pts[i], b = pts[i + 1];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const steps = Math.max(1, Math.round(len / 20));
+      for (let k = 0; k < steps; k++) {
+        const u = k / steps;
+        fine.push({ x: a.x + dx * u, y: a.y + dy * u, nx: -dy / len, ny: dx / len });
+      }
+    }
+    fine.push({
+      x: pts[pts.length - 1].x, y: pts[pts.length - 1].y,
+      nx: fine[fine.length - 1].nx, ny: fine[fine.length - 1].ny,
+    });
+    const open = fine.map((p) => !city.river.bridges
+      .some((b) => Math.hypot(b.x - p.x, b.y - p.y) < CITY.bridgeRadius));
+    const out: { x: number; y: number }[][] = [];
+    let run: typeof fine = [];
+    const flush = () => {
+      if (run.length >= 2) {
+        const poly = run.map((p) => ({ x: p.x + p.nx * CHANNEL, y: p.y + p.ny * CHANNEL }));
+        for (let i = run.length - 1; i >= 0; i--) {
+          poly.push({ x: run[i].x - run[i].nx * CHANNEL, y: run[i].y - run[i].ny * CHANNEL });
+        }
+        out.push(poly);
+      }
+      run = [];
+    };
+    fine.forEach((p, i) => { if (open[i]) run.push(p); else flush(); });
+    flush();
+    return out;
+  })();
 
   /**
    * The ground, with a hole cut through it at every stairwell that goes DOWN.
@@ -280,6 +328,14 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
       const hole = new THREE.Path();
       hole.moveTo(pts[0].x, -pts[0].z);
       for (let i = 1; i < pts.length; i++) hole.lineTo(pts[i].x, -pts[i].z);
+      hole.closePath();
+      shape.holes.push(hole);
+    }
+
+    for (const poly of channels) {
+      const hole = new THREE.Path();
+      hole.moveTo(poly[0].x, -poly[0].y);
+      for (let i = 1; i < poly.length; i++) hole.lineTo(poly[i].x, -poly[i].y);
       hole.closePath();
       shape.holes.push(hole);
     }
@@ -536,11 +592,13 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
       dash.push(mm);
     };
     const GAP = 13;
+    // Not across the water: a centre line painted over the river is the same
+    // mistake as a pavement laid across it, only harder to spot.
     for (const x of city.streets.xs) {
-      for (let z = 40; z < CITY.height - 40; z += GAP) put(x, z, 'z');
+      for (let z = 40; z < CITY.height - 40; z += GAP) if (!overWater(x, z)) put(x, z, 'z');
     }
     for (const y of city.streets.ys) {
-      for (let x = 40; x < CITY.width - 40; x += GAP) put(x, y, 'x');
+      for (let x = 40; x < CITY.width - 40; x += GAP) if (!overWater(x, y)) put(x, y, 'x');
     }
     const marks = new THREE.InstancedMesh(
       keep(new THREE.BoxGeometry(1, 0.04, 1)),
@@ -552,9 +610,10 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
     scene.add(marks);
   }
 
-  // ── the river: a ribbon along the channel, sunk below street level ───────
+  // ── the river: water in the channel, with a quay wall down each bank ─────
+  const stoneMat = keep(new THREE.MeshLambertMaterial({ color: 0x565c66 }));
   {
-    const half = 48;
+    const half = CHANNEL;
     const pts = city.river.poly;
     const pos: number[] = [];
     for (let i = 0; i < pts.length; i++) {
@@ -573,15 +632,53 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     geo.setIndex(idx);
     geo.computeVertexNormals();
+    /**
+     * Double-sided, and not because you can get under it. The strip is built
+     * as a pair of edges per polyline point, so which way its faces point
+     * depends on which way the river happens to run — and it did not matter
+     * while the ground was laid over the top of it and the water was never
+     * visible at all. Now that the channel is a hole, a river drawn the wrong
+     * way round is a hole with sky at the bottom.
+     */
     const water = new THREE.Mesh(geo, keep(new THREE.MeshLambertMaterial({
-      color: 0x244f6e, transparent: true, opacity: 0.94,
+      color: 0x244f6e, side: THREE.DoubleSide,
     })));
     water.position.y = -1.4;
     scene.add(water);
+
+    /**
+     * The quay. It does two jobs: it closes the vertical face between the
+     * street and the water, which would otherwise be a strip of sky at the
+     * waterline, and it MARKS THE EDGE. Land you can see and cannot enter is
+     * indistinguishable from an invisible wall unless something stands at the
+     * boundary, and the river is the biggest piece of unenterable land in the
+     * city — you may not walk across it except on a bridge, and that rule is
+     * the reason the game has route planning in it.
+     */
+    const quay: THREE.BufferGeometry[] = [];
+    for (const poly of channels) {
+      for (let i = 0; i + 1 < poly.length; i++) {
+        const a = poly[i], b = poly[i + 1];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const len = Math.hypot(dx, dy);
+        // The polygon runs up one bank and back down the other; the joining
+        // edge at each end is the open water, and gets no wall.
+        if (len < 1 || len > 40) continue;
+        const g = new THREE.BoxGeometry(len + 1.2, 3.6, 1.4);
+        g.translate(0, -1.4, 0);
+        g.rotateY(-Math.atan2(dy, dx));
+        g.translate((a.x + b.x) / 2, 0, (a.y + b.y) / 2);
+        quay.push(g);
+      }
+    }
+    if (quay.length) {
+      const g = mergeGeometries(quay, false)!;
+      quay.forEach((x) => x.dispose());
+      scene.add(new THREE.Mesh(keep(g), stoneMat));
+    }
   }
 
-  // ── bridges, and the quay walls that stop you walking into the water ─────
-  const stoneMat = keep(new THREE.MeshLambertMaterial({ color: 0x565c66 }));
+  // ── bridges ─────────────────────────────────────────────────────────────
   for (const b of city.river.bridges) {
     // Top flush with the road. At -0.2 the deck stood 400mm proud of the
     // street and pedestrians walked through the side of it, because walking

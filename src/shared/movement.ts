@@ -12,7 +12,7 @@
  * the same question as "am I standing on it", asked at speed.
  */
 import { BODIES, CITY, PLAYER, STAMINA, WALK } from './constants.js';
-import { type River, illegalCrossing } from './river.js';
+import { type River, illegalCrossing, inChannel } from './river.js';
 import { type Streets, onStreet, snapToStreet } from './streets.js';
 import { crossesShaftWall, footingAt, pickFloor } from './stations.js';
 import {
@@ -299,10 +299,12 @@ export function stepBody(p: Body, input: MoveInput, dt: number, g: Ground): void
       return false;
     };
 
-    // On foot: somewhere to stand, never across open water, not through a bus.
+    // On foot: somewhere to stand, never across open water and never INTO it,
+    // not through a bus.
     const clear = (x: number, y: number) =>
       standable(g, x, y, p.h)
       && !illegalCrossing(g.river, from, { x, y }, CITY.bridgeRadius)
+      && !inChannel(g.river, { x, y }, CITY.channel, CITY.bridgeRadius)
       && !(t && crossesShaftWall(t.city, from.x, from.y, x, y))
       && !barred(x, y);
     if (!standable(g, from.x, from.y, p.h)) {

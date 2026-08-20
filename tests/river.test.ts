@@ -10,7 +10,7 @@
 import { CITY, WALK } from '../src/shared/constants.js';
 import { buildCity } from '../src/shared/city.js';
 import { newBody, stepBody } from '../src/shared/movement.js';
-import { bankOf, illegalCrossing, nearestOnRiver } from '../src/shared/river.js';
+import { bankOf, illegalCrossing } from '../src/shared/river.js';
 import { bridgeSites, onStreet } from '../src/shared/streets.js';
 import { walkNeighbours } from '../src/shared/routing.js';
 import { check, describe, note, report } from './harness.js';
@@ -79,10 +79,30 @@ if (quays.length) {
 describe('crossing at a bridge');
 
 let bridged = 0;
+/**
+ * Across the water, which means perpendicular to the river's own direction at
+ * the bridge. Taken from the nearest SEGMENT of the channel — sampling a point
+ * a metre to one side and reading the offset back works only while the river
+ * runs diagonally, and it now runs along the grid, so that trick returned a
+ * direction of zero and the walker stood still on the bridge.
+ */
+const acrossAt = (b: { x: number; y: number }) => {
+  let best = 1, bd = Infinity;
+  for (let i = 1; i < river.poly.length; i++) {
+    const m = {
+      x: (river.poly[i - 1].x + river.poly[i].x) / 2,
+      y: (river.poly[i - 1].y + river.poly[i].y) / 2,
+    };
+    const d = Math.hypot(m.x - b.x, m.y - b.y);
+    if (d < bd) { bd = d; best = i; }
+  }
+  const a = river.poly[best - 1], c = river.poly[best];
+  const len = Math.hypot(c.x - a.x, c.y - a.y) || 1;
+  return { x: -(c.y - a.y) / len, y: (c.x - a.x) / len };
+};
+
 for (const b of river.bridges) {
-  const near = nearestOnRiver(river, { x: b.x + 1, y: b.y });
-  const len = Math.hypot(b.x - near.x, b.y - near.y) || 1;
-  const dir = { x: -(b.y - near.y) / len, y: (b.x - near.x) / len };
+  const dir = acrossAt(b);
   const w = newBody(b.x - dir.x * 90, b.y - dir.y * 90);
   const startBank = bankOf(river, w);
   const ground = { streets: city.streets, river, transit: null };

@@ -666,6 +666,22 @@ handful of crossings, and choosing wrong is a mistake you cannot walk off.
 Every generated race crosses it — that is a hard criterion, not a preference,
 because a same-bank race has no decision at the top of it.
 
+**It follows the street grid, and that is the point.** The river used to be a
+smooth diagonal drawn without reference to anything else, which meant it ran
+straight through the city: a dozen streets ended in the middle of the water,
+the pavements carried on across it, and no road anywhere ran ALONG the bank —
+which is the most useful road in a city built on a river. It now runs down the
+gap between two streets, in axis-aligned legs with a bend or two, so those two
+streets become the embankment and every street that meets the water stops
+there. The channel has to fit between them with a kerb to spare, which is what
+`CITY.channel` is measured against.
+
+It was invisible for a long time as well, and for a stupid reason: the water
+was drawn a metre below the street and the ground was one unbroken plane laid
+over the top of it. The ground has a hole in it now, the hole has a quay wall
+down each side, and twenty-nine buildings per city that were standing in the
+channel are not built any more.
+
 Two details that are easy to undo by accident:
 
 - **`onBank()`'s clearance is 70m, and it used to be 130m.** At 130 no stop in
@@ -677,7 +693,16 @@ Two details that are easy to undo by accident:
 - **Crossing lines are built as two corridors meeting at a bridge**, with the
   bridge forced to be a station (`via`). Bridge stations are where you are
   compelled to change banks, so they had better be somewhere you can get on and
-  off.
+  off. Both anchors must be on opposite SIDES of the bridge, not merely on
+  opposite banks: two anchors near the same crossing give a line that runs out
+  to the water and doubles straight back, with a station at the point of the
+  hairpin.
+- **`illegalCrossing` is not enough on its own.** It stops you walking ACROSS
+  the river, which is a different thing from stopping you walking INTO it — the
+  grid runs on regardless of where the water is, so you could stroll off the
+  quay and stand halfway to the far bank on nothing at all. `inChannel` is the
+  rule that matches the hole in the ground, and the walk graph drops junctions
+  that land in the water for the same reason.
 
 ---
 

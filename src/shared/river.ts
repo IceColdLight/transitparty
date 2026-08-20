@@ -23,6 +23,43 @@ export type River = {
   bridges: Pt[];
 };
 
+/**
+ * Is this point in the water?
+ *
+ * `illegalCrossing` stops you walking ACROSS the river, which is not the same
+ * thing as stopping you walking INTO it: the street grid runs on regardless of
+ * where the water is, so before this you could stroll off the quay and stand
+ * halfway to the far bank on nothing at all. The channel is a hole in the
+ * ground now, and this is the rule that matches.
+ */
+export function inChannel(river: River, p: Pt, channel: number, bridgeRadius: number): boolean {
+  if (nearestOnRiver(river, p).dist > channel) return false;
+  return !river.bridges.some((b) => Math.hypot(b.x - p.x, b.y - p.y) < bridgeRadius);
+}
+
+/**
+ * Which way the water runs nearest this point.
+ *
+ * Everything that has to draw something ACROSS the river — a bridge rung on
+ * the map, a camera looking over it — needs this, and the trick they all used
+ * instead was to sample a point a metre to one side and read the offset back.
+ * That works only while the river runs diagonally. It runs along the street
+ * grid now, so the offset came back as zero and every bridge on the map was
+ * drawn pointing the same way.
+ */
+export function directionAt(river: River, p: Pt): Pt {
+  let best = 1, bd = Infinity;
+  for (let i = 1; i < river.poly.length; i++) {
+    const a = river.poly[i - 1], b = river.poly[i];
+    const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const d = Math.hypot(m.x - p.x, m.y - p.y);
+    if (d < bd) { bd = d; best = i; }
+  }
+  const a = river.poly[best - 1], b = river.poly[best];
+  const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  return { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
+}
+
 /** Where two segments cross, or null. */
 export function segIntersect(a: Pt, b: Pt, c: Pt, d: Pt): Pt | null {
   const r = { x: b.x - a.x, y: b.y - a.y };

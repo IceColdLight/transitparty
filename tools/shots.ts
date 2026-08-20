@@ -16,7 +16,7 @@ import createGL from 'gl';
 import * as THREE from 'three';
 import { createCanvas } from '@napi-rs/canvas';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { PLAYER, PLATFORM } from '../src/shared/constants.js';
+import { CITY, PLAYER, PLATFORM } from '../src/shared/constants.js';
 import { buildCity } from '../src/shared/city.js';
 import { onStreet, platformAt } from '../src/shared/streets.js';
 import { allVehicles } from '../src/shared/vehicles.js';
@@ -174,6 +174,27 @@ if (rider) shoot('fp-riding', rider.x, rider.y, 0.5, rider.angle);
       tr.hall.y + Math.sin(across) * off - Math.sin(tr.hall.angle) * (tr.hall.hl - 4),
       tr.level, tr.hall.angle);
   }
+}
+
+// The water, from one quay looking across at the other — the view the river
+// exists to give you, a platform seventy metres away on the wrong side of it.
+{
+  const poly = city.river.poly;
+  // Midway along, and as far from a bridge as the river gets.
+  let at = 1, far = 0;
+  poly.forEach((p, i) => {
+    if (i === 0 || i + 1 >= poly.length) return;
+    const d = Math.min(...city.river.bridges.map((b) => Math.hypot(b.x - p.x, b.y - p.y)));
+    if (d > far) { far = d; at = i; }
+  });
+  const p = poly[at - 1], q = poly[at + 1];
+  const len = Math.hypot(q.x - p.x, q.y - p.y) || 1;
+  const nx = -(q.y - p.y) / len, ny = (q.x - p.x) / len;
+  const off = CITY.channel + 6;
+  shoot('riverbank',
+    poly[at].x + nx * off, poly[at].y + ny * off, PLAYER.eye,
+    Math.atan2(-ny, -nx), -0.03);
+  shoot('river-air', poly[at].x, poly[at].y, 520, Math.atan2(q.y - p.y, q.x - p.x), -1.42);
 }
 
 // Standing on a street looking at the corner building, where the plates are.

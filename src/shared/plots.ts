@@ -11,6 +11,8 @@
  * open it up. It is to make sure there is something there, and to fence the
  * few places where there cannot be.
  */
+import { CITY } from './constants.js';
+import { nearestOnRiver } from './river.js';
 import { rectsOverlap, type Rect } from './stations.js';
 import type { City } from './types.js';
 
@@ -81,6 +83,29 @@ export function blockedBySurfaceRail(city: City, plot: Rect): boolean {
   return false;
 }
 
+/**
+ * Is any of this plot in the water?
+ *
+ * Blocks are cut by the street grid and know nothing about the river, so a
+ * block that straddles it gets built on like any other — twenty-nine buildings
+ * per city were standing in the channel, which among other things is why the
+ * water was invisible from the street: the river was paved over by the ground
+ * and then built on top of.
+ *
+ * Nine samples rather than an exact rectangle-to-polyline distance. The
+ * channel is a hundred metres wide and a plot is seventy, so the corners and
+ * the edge midpoints leave nothing worth finding.
+ */
+export function inTheWater(city: City, r: Rect): boolean {
+  for (const u of [-1, 0, 1]) {
+    for (const v of [-1, 0, 1]) {
+      const p = { x: r.x + u * r.hl, y: r.y + v * r.hw };
+      if (nearestOnRiver(city.river, p).dist < CITY.channel) return true;
+    }
+  }
+  return false;
+}
+
 /** Every building on every block, as flat rectangles with a height. */
 export function footprintsOf(city: City): Footprint[] {
   const out: Footprint[] = [];
@@ -99,7 +124,8 @@ export function footprintsOf(city: City): Footprint[] {
         const px = gx + inset + w / 2, py = gy + inset + d / 2;
         // The whole footprint, not a circle inside it: a viaduct clearing the
         // middle of a plot by a metre still goes through both its corners.
-        if (blockedBySurfaceRail(city, { x: px, y: py, angle: 0, hl: w / 2, hw: d / 2 })) continue;
+        const plot: Rect = { x: px, y: py, angle: 0, hl: w / 2, hw: d / 2 };
+        if (blockedBySurfaceRail(city, plot) || inTheWater(city, plot)) continue;
         out.push({ x: px, y: py, w, d, h: 11 + n * 34 + hash2(gy, gx) * 12, tone: n });
       }
     }
