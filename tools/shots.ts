@@ -176,6 +176,13 @@ if (rider) shoot('fp-riding', rider.x, rider.y, 0.5, rider.angle);
   }
 }
 
+// Standing on a street looking at the corner building, where the plates are.
+{
+  const sx = city.streets.xs[Math.floor(city.streets.xs.length / 2)];
+  const sy = city.streets.ys[Math.floor(city.streets.ys.length / 2)];
+  shoot('corner', sx, sy - 26, 0, Math.PI / 2, 0.06);
+}
+
 // One portrait of each mode, from the side, ten metres off.
 for (const mode of ['bus', 'tram', 'metro', 'train'] as const) {
   const v = vehicles.find((x) => city.lines[x.line].mode === mode && x.atStop >= 0)

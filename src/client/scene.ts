@@ -646,40 +646,73 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
     };
     const postMat = keep(new THREE.MeshLambertMaterial({ color: 0x2a2f38 }));
     const postGeo = keep(new THREE.CylinderGeometry(0.07, 0.07, 4.9, 6));
-    // Street-sign sized and mounted above head height, so a corner is
-    // something you glance up at rather than a hoarding in your way.
     const plateGeo = keep(new THREE.PlaneGeometry(2.7, 0.85));
     const half = city.streets.width / 2;
-    const MOUNT = 4.1;
 
+    /**
+     * Mounted on the corner building wherever there is one, which is where a
+     * European city puts them and is far easier to read than a pole: you are
+     * walking down a street looking at the buildings anyway, and a plate on
+     * the wall is at eye level in your path rather than somewhere overhead.
+     *
+     * A post is the fallback for a corner with no building on it — beside a
+     * park, or where the railway has taken the plot.
+     */
+    /**
+     * Nearest by CORNER, not by centre. A block's footprint can be sixty
+     * metres across, so its middle is always further from the junction than
+     * any sensible search radius — measured that way every corner in the city
+     * failed to find a building and fell back to a post.
+     */
+    const nearestBuilding = (jx: number, jy: number) => {
+      let best: typeof boxes[0] | null = null, bd = 34 * 34;
+      for (const bx of boxes) {
+        const cx = Math.max(bx.x - bx.w / 2, Math.min(jx, bx.x + bx.w / 2));
+        const cy = Math.max(bx.y - bx.d / 2, Math.min(jy, bx.y + bx.d / 2));
+        const d = (cx - jx) ** 2 + (cy - jy) ** 2;
+        if (d < bd) { bd = d; best = bx; }
+      }
+      return best;
+    };
+
+    const MOUNT = 3.4;
     for (let i = 0; i < city.streets.xs.length; i++) {
       for (let j = 0; j < city.streets.ys.length; j++) {
         const x = city.streets.xs[i], y = city.streets.ys[j];
-        // On a corner of the junction, clear of the carriageway.
-        const cx = x + (i % 2 === 0 ? 1 : -1) * (half - 2.2);
-        const cy = y + (j % 2 === 0 ? 1 : -1) * (half - 2.2);
-        const post = new THREE.Mesh(postGeo, postMat);
-        post.position.set(cx, 2.45, cy);
-        scene.add(post);
+        const b = nearestBuilding(x, y);
 
-        /**
-         * Each plate faces down the street it names, so you read it walking
-         * along that street — and there are two of them back to back at the
-         * SAME height, a few centimetres apart. Offsetting the second one
-         * vertically instead put two signs on a pole at different heights;
-         * leaving them coplanar makes them z-fight.
-         */
-        const put = (text: string, rot: number, lift: number) => {
-          for (const flip of [0, Math.PI]) {
+        /** Two plates back to back, a few centimetres apart so they cannot z-fight. */
+        const put = (text: string, px: number, py: number, pz: number, rot: number, both: boolean) => {
+          for (const flip of both ? [0, Math.PI] : [0]) {
             const m = new THREE.Mesh(plateGeo, plate(text));
             const a = rot + flip;
-            m.position.set(cx - Math.sin(-a) * 0.03, MOUNT + lift, cy - Math.cos(-a) * 0.03);
+            m.position.set(px - Math.sin(-a) * 0.03, py, pz - Math.cos(-a) * 0.03);
             m.rotation.y = a;
             scene.add(m);
           }
         };
-        put(city.streets.xNames[i], 0, 0);
-        put(city.streets.yNames[j], Math.PI / 2, -0.95);
+
+        if (b) {
+          // The corner of the building nearest the junction, one plate per face.
+          const sx = Math.sign(x - b.x) || 1;
+          const sy = Math.sign(y - b.y) || 1;
+          const cx = b.x + sx * (b.w / 2 + 0.12);
+          const cy = b.y + sy * (b.d / 2 + 0.12);
+          const inx = b.x + sx * (b.w / 2 - 1.6);
+          const iny = b.y + sy * (b.d / 2 - 1.6);
+          // faces along z carry the north-south street; faces along x the other
+          put(city.streets.xNames[i], inx, MOUNT, cy, sy > 0 ? 0 : Math.PI, false);
+          put(city.streets.yNames[j], cx, MOUNT - 0.95, iny,
+            sx > 0 ? Math.PI / 2 : -Math.PI / 2, false);
+        } else {
+          const px = x + (i % 2 === 0 ? 1 : -1) * (half - 2.2);
+          const py = y + (j % 2 === 0 ? 1 : -1) * (half - 2.2);
+          const post = new THREE.Mesh(postGeo, postMat);
+          post.position.set(px, 2.45, py);
+          scene.add(post);
+          put(city.streets.xNames[i], px, 4.1, py, 0, true);
+          put(city.streets.yNames[j], px, 3.15, py, Math.PI / 2, true);
+        }
       }
     }
   }

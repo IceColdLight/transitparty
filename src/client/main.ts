@@ -22,7 +22,7 @@ import { type Body, newBody, stepBody } from '../shared/movement.js';
 import { allVehicles, toLocal, toWorld, vehicleById } from '../shared/vehicles.js';
 import type { City, PlayerState, WorldState } from '../shared/types.js';
 import { connect } from './net.js';
-import { drawMap } from './map.js';
+import { type MapView, drawMap } from './map.js';
 import { type Scene3D, buildScene } from './scene.js';
 
 const params = new URLSearchParams(location.search);
@@ -82,6 +82,14 @@ heldMap.renderOrder = 10;
 (heldMap.material as THREE.Material).depthTest = false;
 camera.add(heldMap);
 
+/**
+ * Where the map is scrolled to, kept between openings.
+ *
+ * A player who has zoomed into the quarter they are working in should find it
+ * still there next time they take the map out — putting it away and getting it
+ * back should not undo their reading.
+ */
+const mapAt: MapView = { zoom: 1, panX: 0, panY: 0 };
 let mapDrawnAt = -1;
 function refreshMap(city: City, vehicles: ReturnType<typeof allVehicles>, players: PlayerState[]) {
   // Card stock, then the diagram printed on it.
@@ -92,7 +100,7 @@ function refreshMap(city: City, vehicles: ReturnType<typeof allVehicles>, player
   mapCtx.save();
   mapCtx.translate(MAP_PAD, MAP_PAD);
   drawMap(mapCtx, city, { w: MAP_W - MAP_PAD * 2, h: MAP_H - MAP_PAD * 2 },
-    vehicles, players, selfId, 1);
+    vehicles, players, selfId, 1, mapAt);
   mapCtx.restore();
   mapTex.needsUpdate = true;
 }
@@ -123,11 +131,39 @@ document.addEventListener('pointerlockchange', () => {
 });
 addEventListener('mousemove', (e) => {
   if (!locked) return;
+  /**
+   * With the map up the mouse reads the MAP, not the street: it pans the sheet
+   * instead of turning your head. You are looking at a piece of paper held in
+   * front of your face — being able to look around it as well would make the
+   * thing weightless, and the whole reason holding it costs you is that it
+   * takes your attention.
+   */
+  if (keys.has('tab')) {
+    mapAt.panX += e.movementX * 1.1;
+    mapAt.panY += e.movementY * 1.1;
+    const room = 520 * mapAt.zoom;
+    mapAt.panX = Math.max(-room, Math.min(room, mapAt.panX));
+    mapAt.panY = Math.max(-room, Math.min(room, mapAt.panY));
+    mapDrawnAt = -1;
+    return;
+  }
   const sens = 0.0022;
   facing += e.movementX * sens;
   pitch -= e.movementY * sens;
   pitch = Math.max(-1.45, Math.min(1.45, pitch));
 });
+
+addEventListener('wheel', (e) => {
+  if (!locked || !keys.has('tab')) return;
+  e.preventDefault();
+  const before = mapAt.zoom;
+  mapAt.zoom = Math.max(1, Math.min(5, mapAt.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+  // Keep whatever was in the middle of the sheet in the middle of the sheet.
+  const r = mapAt.zoom / before;
+  mapAt.panX *= r;
+  mapAt.panY *= r;
+  mapDrawnAt = -1;
+}, { passive: false });
 
 /**
  * The click has to be caught on the OVERLAY, not on the canvas.
@@ -379,6 +415,23 @@ function frame(now: number) {
 
   // ── the map in your hands ───────────────────────────────────────────────
   const wantMap = locked && keys.has('tab');
+
+  /**
+   * Zoom the map with + and -, held rather than tapped. The wheel does the
+   * same thing, and not every mouse has one that works.
+   */
+  if (wantMap) {
+    const zin = held('+', '='), zout = held('-', '_');
+    if (zin !== zout) {
+      const was = mapAt.zoom;
+      const rate = 1 + dt * 1.9;
+      mapAt.zoom = Math.max(1, Math.min(5, mapAt.zoom * (zin ? rate : 1 / rate)));
+      const r = mapAt.zoom / was;
+      mapAt.panX *= r;
+      mapAt.panY *= r;
+      mapDrawnAt = -1;
+    }
+  }
   const target = wantMap ? -0.17 : -0.92;
   heldMap.position.y += (target - heldMap.position.y) * Math.min(1, dt * 13);
   heldMap.visible = heldMap.position.y > -0.9;

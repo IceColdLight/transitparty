@@ -85,7 +85,7 @@ Type a name and hit **Play** — that takes the mouse as well.
 | `WASD` | walk, relative to where you are looking |
 | `SHIFT` | run — a few seconds' worth, then you need a rest |
 | `SPACE` | jump |
-| `TAB` | **hold** to take out your map |
+| `TAB` | **hold** to take out your map — mouse pans it, wheel or `+`/`-` zooms |
 | `ESC` | give the mouse back |
 
 You start on a platform. Somewhere across the city is a **column of gold light**
@@ -112,9 +112,10 @@ metres and lands you somewhere you did not walk to. Walk to the edge first —
 jumping on the spot in the middle of the deck just puts you back on it.
 
 **The map does not show you where you are.** No dot, no marker — finding
-yourself is the work. Read the street name on the corner, read the name on the
-platform, and find it on the diagram. Rivals *are* on the map, so following one
-is a strategy.
+yourself is the work. Every street is named, on a blue plate on the corner
+building, and the map carries the street grid faintly under the network: read
+the two names on the corner, find where those streets cross on the sheet, and
+that is you. Rivals *are* on the map, so following one is a strategy.
 
 **Hold TAB and read the map.** It shows the whole network and every vehicle on
 it, live, with a legend telling you what each line is, how fast it actually

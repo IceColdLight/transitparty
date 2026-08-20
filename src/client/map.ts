@@ -14,7 +14,7 @@
  * trams ARE is the information the game is played on. What it withholds is
  * scale.
  */
-import { MODES, WALK, type ModeId } from '../shared/constants.js';
+import { CITY, MODES, WALK, type ModeId } from '../shared/constants.js';
 import { nearestOnRiver } from '../shared/river.js';
 import { warp } from '../shared/schematic.js';
 import type { City, PlayerState, Vehicle } from '../shared/types.js';
@@ -30,6 +30,9 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
+/** Where the reader has the map scrolled to. Kept between openings. */
+export type MapView = { zoom: number; panX: number; panY: number };
+
 export function drawMap(
   ctx: CanvasRenderingContext2D,
   city: City,
@@ -38,6 +41,7 @@ export function drawMap(
   players: PlayerState[],
   selfId: string,
   alpha: number,
+  at: MapView = { zoom: 1, panX: 0, panY: 0 },
 ) {
   if (alpha <= 0.01) return;
   ctx.save();
@@ -69,9 +73,19 @@ export function drawMap(
     minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
   }
   const availW = view.w - pad * 2 - reserve;
-  const k = Math.min(availW / (maxX - minX || 1), (view.h - pad * 2) / (maxY - minY || 1));
-  const ox = reserve + (availW - (maxX - minX) * k) / 2 + pad - minX * k;
-  const oy = (view.h - (maxY - minY) * k) / 2 - minY * k;
+  const fit = Math.min(availW / (maxX - minX || 1), (view.h - pad * 2) / (maxY - minY || 1));
+  const fox = reserve + (availW - (maxX - minX) * fit) / 2 + pad - minX * fit;
+  const foy = (view.h - (maxY - minY) * fit) / 2 - minY * fit;
+
+  /**
+   * Zoom and pan about the middle of the sheet. Text is NOT scaled with it —
+   * a name stays the same size while the space around it grows, which is what
+   * makes zooming in reveal labels the collision pass had to drop rather than
+   * simply making the same labels bigger.
+   */
+  const k = fit * at.zoom;
+  const ox = view.w / 2 + (fox - view.w / 2) * at.zoom + at.panX;
+  const oy = view.h / 2 + (foy - view.h / 2) * at.zoom + at.panY;
   const P = (p: { x: number; y: number }) => ({ x: warp(p).x * k + ox, y: warp(p).y * k + oy });
   const S = (i: number) => ({ x: wp[i].x * k + ox, y: wp[i].y * k + oy });
 
@@ -82,6 +96,57 @@ export function drawMap(
    * possible thing for it to look like. Wide, dim and blue is unmistakably
    * terrain.
    */
+  /**
+   * The street grid, faint, under everything.
+   *
+   * This is what lets a player work out where they are standing, now that the
+   * map does not tell them: read the two names on the corner, find where those
+   * two streets cross on the sheet, and that is you. Without it the station
+   * names are the only handhold, and only interchanges have room for a label.
+   *
+   * The names repeat along each street rather than sitting once at the margin,
+   * so whatever corner of the map you have zoomed into, there is one nearby.
+   */
+  {
+    const line = (fixed: number, vertical: boolean, name: string) => {
+      const pts: { x: number; y: number }[] = [];
+      const span = vertical ? CITY.height : CITY.width;
+      for (let t = 0; t <= 12; t++) {
+        const along = (t / 12) * span;
+        pts.push(P(vertical ? { x: fixed, y: along } : { x: along, y: fixed }));
+      }
+      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      pts.forEach((q, i2) => (i2 === 0 ? ctx.moveTo(q.x, q.y) : ctx.lineTo(q.x, q.y)));
+      ctx.stroke();
+
+      ctx.font = '600 9px system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(190, 205, 220, 0.42)';
+      ctx.textAlign = 'center';
+      let since = 1e9;
+      for (let i2 = 1; i2 < pts.length; i2++) {
+        const a2 = pts[i2 - 1], b2 = pts[i2];
+        const seg = Math.hypot(b2.x - a2.x, b2.y - a2.y);
+        since += seg;
+        if (since < 240) continue;
+        const mid = { x: (a2.x + b2.x) / 2, y: (a2.y + b2.y) / 2 };
+        if (mid.x < 8 || mid.x > view.w - 8 || mid.y < 8 || mid.y > view.h - 8) continue;
+        since = 0;
+        let ang = Math.atan2(b2.y - a2.y, b2.x - a2.x);
+        if (ang > Math.PI / 2 || ang < -Math.PI / 2) ang += Math.PI;
+        ctx.save();
+        ctx.translate(mid.x, mid.y);
+        ctx.rotate(ang);
+        ctx.fillText(name, 0, -3);
+        ctx.restore();
+      }
+      ctx.textAlign = 'left';
+    };
+    city.streets.xs.forEach((x, i2) => line(x, true, city.streets.xNames[i2]));
+    city.streets.ys.forEach((y, i2) => line(y, false, city.streets.yNames[i2]));
+  }
+
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
   const riverPath = () => {
     ctx.beginPath();

@@ -548,10 +548,24 @@ the city, you look at the pip and steer it. Taking it away makes locating
 yourself the work — and that only becomes a skill rather than a punishment if
 the city can actually be read. So:
 
-- **Every street has a name**, on a plate at every junction, facing down the
-  street it names, on a dark blue ground — street names and station names hang
-  at similar heights on similar poles and both say a place name, so colour is
-  the only thing telling them apart at a glance. Twenty-odd names to a city; the plates share a material per
+- **Every street has a name**, on a dark blue plate mounted on the corner
+  BUILDING — where a European city puts them, and far easier to read than a
+  pole, because you are looking at the buildings as you walk anyway. A post is
+  the fallback for a corner with no building on it. The colour matters: street
+  names and station names both say a place name and hang at similar heights,
+  so it is the only thing telling them apart at a glance.
+- **The map carries the street grid**, faint, under the network, with the names
+  repeated along each street rather than sitting once at the margin. This is
+  what actually lets you work out where you are: read the two names on the
+  corner, find where those two streets cross on the sheet. Without it, station
+  names are the only handhold and only interchanges have room for a label.
+- **The map zooms and pans, and remembers where you left it.** Street names on
+  a whole-city diagram are unreadable at fit-to-page, and a player who has
+  zoomed into the quarter they are working in should find it still there next
+  time they take the map out. While the map is up the MOUSE reads the map
+  instead of turning your head — you are looking at a piece of paper held in
+  front of your face, and being able to look around it as well would make the
+  thing weightless. Twenty-odd names to a city; the plates share a material per
   name, because a hundred and sixty junctions would otherwise mean six hundred
   textures of two dozen words.
 - **Every interchange is labelled on the map**, not just the busiest ones, and
