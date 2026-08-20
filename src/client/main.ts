@@ -116,7 +116,6 @@ addEventListener('keydown', (e) => {
 addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 addEventListener('blur', () => keys.clear());
 
-renderer.domElement.addEventListener('click', () => renderer.domElement.requestPointerLock());
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === renderer.domElement;
   lockEl.style.display = locked ? 'none' : 'flex';
@@ -130,6 +129,24 @@ addEventListener('mousemove', (e) => {
   pitch -= e.movementY * sens;
   pitch = Math.max(-1.45, Math.min(1.45, pitch));
 });
+
+/**
+ * The click has to be caught on the OVERLAY, not on the canvas.
+ *
+ * `#lock` is a fixed, full-screen panel at z-index 30 — it covers the canvas
+ * completely, so a listener on the canvas never sees the click that is
+ * supposed to start the game and the "click to play" card just sat there.
+ *
+ * The rejection is swallowed on purpose: a browser refuses a fresh lock for a
+ * second or so after the user pressed Escape, and an unhandled rejection every
+ * time somebody taps Escape twice is noise.
+ */
+function grabMouse() {
+  const r = renderer.domElement.requestPointerLock() as unknown as Promise<void> | undefined;
+  if (r && typeof r.catch === 'function') r.catch(() => {});
+}
+lockEl.addEventListener('click', grabMouse);
+renderer.domElement.addEventListener('click', grabMouse);
 
 const held = (...names: string[]) => names.some((n) => keys.has(n));
 

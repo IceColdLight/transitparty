@@ -233,8 +233,10 @@ async function main() {
         if (me(b).riding === null) off = true;
       }
           halt();
-      check('you can jump off a moving bus', off, off ? 'landed' : 'still aboard');
-      await sleep(900);
+      check('you can jump off a moving bus', off, off ? 'left the deck' : 'still aboard');
+      // Wait until the arc is actually over rather than guessing at how long
+      // it takes: you might have left from a deck, mid-stride, over a bridge.
+      for (let i = 0; i < 40 && !me(b).grounded; i++) await sleep(100);
       /**
        * Where you land is not the point and is not predictable — the street,
        * another vehicle, or back on the one you left, depending on how close

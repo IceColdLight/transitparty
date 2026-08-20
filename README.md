@@ -86,7 +86,7 @@ Click the window to take the mouse.
 | `SHIFT` | run — a few seconds' worth, then you need a rest |
 | `SPACE` | jump |
 | `TAB` | **hold** to take out your map |
-| `R` | unstick yourself |
+| `R` | put yourself back on the nearest street, if you end up somewhere daft |
 | `ESC` | give the mouse back |
 
 You start on a platform. Somewhere across the city is a **column of gold light**

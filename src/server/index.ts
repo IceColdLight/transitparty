@@ -16,7 +16,7 @@ import {
 import { buildCity } from '../shared/city.js';
 import { type Body, newBody, stepBody } from '../shared/movement.js';
 import { allVehicles } from '../shared/vehicles.js';
-import { platformAt } from '../shared/streets.js';
+import { platformAt, snapToStreet } from '../shared/streets.js';
 import type { C2SMessage, City, PlayerState, S2CMessage, WorldState } from '../shared/types.js';
 
 type Client = {
@@ -82,6 +82,33 @@ function spawn(p: PlayerState) {
   p.stamina = 1;
   p.sprinting = false;
   bodies.set(p.id, newBody(p.x, p.y));
+}
+
+/**
+ * The R key. It puts you back on the nearest street, on your feet, off
+ * whatever you were riding — and that is all.
+ *
+ * It used to call `spawn`, which had two problems. It teleported you to the
+ * ORIGIN, so an escape hatch for being stuck cost you the entire race; and
+ * spawn also clears `finished` and `place`, so a player who had already
+ * crossed the line could press R and quietly un-finish themselves — leaving
+ * the finisher count one too high, the next player's placing wrong, and the
+ * round unable to end because somebody was racing again.
+ *
+ * Stamina is carried over. Refilling it would make this a free sprint.
+ */
+function unstick(p: PlayerState) {
+  if (p.finished !== null) return;
+  const here = snapToStreet(city.streets, { x: p.x, y: p.y });
+  const body = bodies.get(p.id);
+  const stamina = body?.stamina ?? 1;
+  p.x = here.x; p.y = here.y; p.h = 0;
+  p.grounded = true;
+  p.riding = null;
+  p.sprinting = false;
+  const fresh = newBody(p.x, p.y);
+  fresh.stamina = stamina;
+  bodies.set(p.id, fresh);
 }
 
 function startRound() {
@@ -205,7 +232,7 @@ wss.on('connection', (socket) => {
       c.sprint = !!msg.sprint;
       c.jump = !!msg.jump;
     } else if (msg.type === 'action') {
-      if (msg.action === 'reset') spawn(player);
+      if (msg.action === 'reset') unstick(player);
     } else if (msg.type === 'name') {
       player.name = String(msg.name).slice(0, 16) || player.name;
     }
