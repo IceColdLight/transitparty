@@ -88,6 +88,50 @@ began rejecting exactly the long multi-change races that are the good ones.
 
 ---
 
+## Sprinting is a burst, not a gear
+
+`SHIFT` gives ×1.7 for about three and a half seconds, and takes four times as
+long to earn back as to spend.
+
+The shape matters more than the numbers. **A sprint you can hold indefinitely
+is just a higher walk speed, and a higher walk speed is a direct attack on the
+one thing this whole game rests on — that the network beats your legs.** What a
+burst buys instead is a decision made twice a race: the doors are open and you
+are forty metres away, do you spend the tank here or keep it for the change at
+the far end.
+
+It is sized against the DOORS, which is the only moment it exists for. A bus
+stands for four seconds; from forty metres you miss it walking (5.6s) and make
+it running (3.3s). One full tank covers 44m — one platform, not one leg of the
+journey. `tests/sprint.test.ts` pins both ends of that.
+
+Three details that are each load-bearing:
+
+- **The latch.** Starting a sprint needs `STAMINA.floor` in the tank;
+  continuing one only needs something above zero. Without the asymmetry,
+  tapping the key every other frame delivers the same speed as holding it but
+  as a stutter — and a stutter is both unreadable to everyone watching and the
+  sort of thing players discover and then feel obliged to do. With it, holding
+  the key covers 510m in 60s in 14 clean runs; tapping covers 508m in 492
+  twitches. No faster, and visibly worse.
+- **Stamina is the server's number, never predicted.** The client keeps its own
+  copy so the local speed is right on the frame you press the key, then defers
+  to the server every tick. A predicted resource lets a laggy client sprint
+  further than everybody else.
+- **`SUSTAINED_WALK`, and the planner uses it.** In steady state you can sprint
+  `burst/(burst + recover)` of the time — about a fifth — which is worth 15% on
+  a long walk. `routing.ts` costs walking at that speed rather than the base
+  one, because vetting every generated race against a number the player beats
+  by holding a key would make `par` a comfortable lie. It is derived from the
+  sprint and the stamina rather than typed in, so changing either moves the
+  planner with it. The street grid had already made walking so much worse
+  (1.30x detour) that absorbing this cost the generator nothing measurable.
+
+Riding recovers stamina, which is what makes spending the whole tank on the
+first dash affordable.
+
+---
+
 ## The street grid, and who has to respect it
 
 `streets.ts` is a rectilinear, irregularly spaced grid, and it does three jobs:
@@ -265,6 +309,8 @@ consequences of other numbers rather than matters of taste:
 | `MODES.*.spacing` | what really separates the modes. It is the reason a bus is never far away and a train always is |
 | `MODES.*.effMin/Max` | derived from each mode's nominal speed and non-overlapping by construction — see "the modes have to be guessable". Widen `BAND` until neighbours touch and the hierarchy silently stops being true |
 | `TEMPO` | taste, not design — but `dwell` and `intermissionSeconds` must stay in absolute seconds when it changes, and the par window has to widen slightly because of it |
+| `WALK.sprint` 1.7 | sized against `MODES.bus.dwell`: the dash has to land inside the doors and the walk has to miss |
+| `SUSTAINED_WALK` | derived, never typed in — it is what the planner charges for walking, and it must track the sprint |
 | `streets.width` 26 | also the tolerance for "is this leg on a street", so the generator's grid check and the player's collision agree by construction |
 
 `tests/city.test.ts` holds the race criteria; `tests/race.test.ts` rides the

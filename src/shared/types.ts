@@ -125,6 +125,10 @@ export type PlayerState = {
   facing: number;
   /** id of the vehicle they are aboard, or null if on foot */
   riding: string | null;
+  /** 0..1 sprint stamina. Everyone's is visible, so a rival's dash is readable */
+  stamina: number;
+  /** actually sprinting right now, for the trail on their token */
+  sprinting: boolean;
   /** seconds after the gun they crossed the line, or null */
   finished: number | null;
   /** finishing position, 1-based, or 0 */
@@ -156,6 +160,8 @@ export type C2SWalk = {
   wx: number;
   wy: number;
   facing: number;
+  /** holding the sprint key */
+  sprint: boolean;
 };
 /** One key does board, alight, and nothing else. */
 export type C2SAction = { type: 'action'; action: 'interact' | 'reset' };

@@ -85,11 +85,61 @@ export const WALK = {
    * a walk.
    */
   speed: 2.4 * TEMPO,
+  /**
+   * Sprint multiplier. Sized against the DOORS, which is the only moment it
+   * exists for: a bus stands for four seconds, so from forty metres out you
+   * miss it walking (5.6s) and make it running (3.3s). Anything less and the
+   * key does nothing you would notice; anything more and the whole city is a
+   * sprint away.
+   */
+  sprint: 1.7,
   /** Reaching full speed almost at once. A race wants crisp starts, not inertia. */
   accel: 26 * TEMPO,
   /** Longest transfer the route planner will consider on foot. */
   transferMax: 260,
 };
+
+/**
+ * Sprinting is a burst, not a gear. You get a few seconds of it and then you
+ * have to have not used it for a while.
+ *
+ * The shape matters more than the numbers. A sprint you can hold indefinitely
+ * is just a faster walk speed, and a faster walk speed is a direct attack on
+ * the one thing this game rests on — that the network beats your legs. What a
+ * burst buys instead is a DECISION, made twice a race: the doors are open and
+ * you are forty metres away, do you spend it here or keep it for the change
+ * at the far end.
+ */
+export const STAMINA = {
+  /** seconds of continuous sprint from full */
+  burst: 3.6,
+  /** seconds of not sprinting to refill from empty */
+  recover: 13,
+  /**
+   * You cannot START a sprint below this, though you may finish one. Without
+   * it, tapping the key every other frame is a permanent 40% speed boost with
+   * a stutter, which is both faster than sprinting properly and unreadable to
+   * everyone watching.
+   */
+  floor: 0.25,
+};
+
+/**
+ * What you actually average on a long walk, sprinting whenever you can.
+ *
+ * The route planner uses THIS, not the base speed. In steady state you can
+ * sprint burst/(burst + recover) of the time — about a fifth — which is worth
+ * a 15% quicker walk overall. Small, but the walk-versus-ride margin is the
+ * criterion every generated race is vetted against, and quoting it against a
+ * speed the player can beat just by holding a key would make `par` a
+ * comfortable lie.
+ *
+ * It is deliberately derived rather than typed in: change the sprint or the
+ * stamina and the planner follows.
+ */
+const sprintDuty = STAMINA.burst / (STAMINA.burst + STAMINA.recover);
+export const SUSTAINED_WALK =
+  WALK.speed * (1 - sprintDuty) + WALK.speed * WALK.sprint * sprintDuty;
 
 /** You can board a vehicle from this far off its stop — the width of a platform. */
 export const BOARD_RADIUS = 17;

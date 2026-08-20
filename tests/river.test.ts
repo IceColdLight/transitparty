@@ -9,7 +9,7 @@
  */
 import { CITY, WALK } from '../src/shared/constants.js';
 import { buildCity } from '../src/shared/city.js';
-import { stepWalk, type Walker } from '../src/shared/movement.js';
+import { newWalker, stepWalk } from '../src/shared/movement.js';
 import { bankOf, illegalCrossing, nearestOnRiver } from '../src/shared/river.js';
 import { bridgeSites, onStreet } from '../src/shared/streets.js';
 import { walkNeighbours } from '../src/shared/routing.js';
@@ -53,7 +53,7 @@ if (quays.length) {
   const len = Math.hypot(q.x - near.x, q.y - near.y) || 1;
   // Along the road, straight at the water.
   const dir = { x: -(q.y - near.y) / len, y: (q.x - near.x) / len };
-  const w: Walker = { x: q.x - dir.x * 130, y: q.y - dir.y * 130, vx: 0, vy: 0 };
+  const w = newWalker(q.x - dir.x * 130, q.y - dir.y * 130);
   const startBank = bankOf(river, w);
   check('the test walker starts on a street', onStreet(city.streets, w),
     `${w.x.toFixed(0)},${w.y.toFixed(0)}`);
@@ -72,7 +72,7 @@ for (const b of river.bridges) {
   const near = nearestOnRiver(river, { x: b.x + 1, y: b.y });
   const len = Math.hypot(b.x - near.x, b.y - near.y) || 1;
   const dir = { x: -(b.y - near.y) / len, y: (b.x - near.x) / len };
-  const w: Walker = { x: b.x - dir.x * 90, y: b.y - dir.y * 90, vx: 0, vy: 0 };
+  const w = newWalker(b.x - dir.x * 90, b.y - dir.y * 90);
   const startBank = bankOf(river, w);
   for (let i = 0; i < 30 * 120; i++) {
     stepWalk(w, dir.x, dir.y, 1 / 30, city.streets, river);

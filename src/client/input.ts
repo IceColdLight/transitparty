@@ -39,6 +39,11 @@ export function readWalkWish(): { x: number; y: number } {
   return len > 0 ? { x: x / len, y: y / len } : { x: 0, y: 0 };
 }
 
+/** Legging it. Held, and it runs out — see STAMINA. */
+export function sprintHeld(): boolean {
+  return held('shift', 'shiftleft', 'shiftright');
+}
+
 /** The map is HELD, not toggled: it should cost you the walk you are not doing. */
 export function mapHeld(): boolean { return keys.has('tab'); }
 

@@ -12,7 +12,7 @@
  * departures, so a good player beats this estimate — that is the point. `par`
  * is a sanity bound, not a target.
  */
-import { WALK } from './constants.js';
+import { SUSTAINED_WALK, WALK } from './constants.js';
 import type { River } from './river.js';
 import { type Streets, type WalkGraph, buildWalkGraph, walkDistances } from './streets.js';
 import type { Line, Stop } from './types.js';
@@ -48,7 +48,10 @@ export type Route = {
 export function walkTime(net: Net, a: number, b: number, g?: WalkGraph): number {
   const graph = g ?? pedestrian(net);
   const d = walkDistances(graph, graph.stopNode[a])[graph.stopNode[b]];
-  return d / WALK.speed;
+  // SUSTAINED_WALK, not WALK.speed: a player sprints whenever the stamina is
+  // there, which is worth about 15% over a long walk. Vetting races against a
+  // speed nobody actually travels at would make par a comfortable lie.
+  return d / SUSTAINED_WALK;
 }
 
 /** Stops reachable on foot from each stop, with the walk already costed. */
@@ -61,7 +64,7 @@ export function walkNeighbours(net: Net, g?: WalkGraph): { to: number; time: num
       if (i === j) continue;
       const d = dist[graph.stopNode[j]];
       if (!(d <= WALK.transferMax)) continue;
-      out[i].push({ to: j, time: d / WALK.speed });
+      out[i].push({ to: j, time: d / SUSTAINED_WALK });
     }
   }
   return out;

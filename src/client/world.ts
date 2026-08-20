@@ -270,6 +270,27 @@ export function drawWorld(
       ox = ((h % 7) - 3) * 3.4;
       oy = (((h >> 3) % 5) - 2) * 3.4;
     }
+    // Speed lines when they are legging it. A rival sprinting is worth
+    // seeing: it means they have spotted something with its doors open, and
+    // it means they are spending a tank they will not have at the next change.
+    if (p.sprinting) {
+      ctx.save();
+      ctx.translate(p.x + ox, p.y + oy);
+      ctx.rotate(p.facing);
+      ctx.strokeStyle = p.color;
+      ctx.globalAlpha = 0.5;
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      for (const dy of [-4.5, 0, 4.5]) {
+        ctx.beginPath();
+        ctx.moveTo(-9, dy);
+        ctx.lineTo(-9 - (dy === 0 ? 15 : 10), dy);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+
     ctx.beginPath();
     ctx.arc(p.x + ox, p.y + oy, me ? 7.5 : 6.5, 0, Math.PI * 2);
     ctx.fillStyle = p.color;

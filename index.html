@@ -84,6 +84,27 @@
         font: inherit; font-size: 13px; font-weight: 800;
       }
 
+      /* stamina — a resource you spend twice a race, so it sits under the
+         prompt where your eyes already are when the doors are closing */
+      #stamina {
+        position: fixed; left: 50%; bottom: 30px; transform: translateX(-50%);
+        width: 190px; pointer-events: none; opacity: 0.9;
+      }
+      #stam-track {
+        height: 7px; border-radius: 4px; overflow: hidden;
+        background: rgba(8,12,17,0.75); border: 1px solid rgba(255,255,255,0.16);
+      }
+      #stam-fill {
+        height: 100%; width: 100%; background: #7fe08a;
+        transition: background 140ms linear;
+      }
+      #stam-fill.spent { background: #d9534f; }
+      #stam-fill.low { background: #ffd166; }
+      #stam-label {
+        margin-top: 4px; text-align: center; font-size: 9px; letter-spacing: 1.6px;
+        text-transform: uppercase; color: #78889a; text-shadow: 0 1px 3px black;
+      }
+
       #hint {
         position: fixed; right: 10px; bottom: 10px; padding: 6px 10px;
         font-size: 11px; color: #8b9aa8; line-height: 1.7; text-align: right;
@@ -142,10 +163,15 @@
 
     <div id="prompt"></div>
 
+    <div id="stamina">
+      <div id="stam-track"><div id="stam-fill"></div></div>
+      <div id="stam-label">shift to run</div>
+    </div>
+
     <input id="name" maxlength="16" placeholder="your name" />
 
     <div id="hint" class="panel">
-      <div><b>WASD</b> walk &nbsp; <b>E</b> board / get off</div>
+      <div><b>WASD</b> walk &nbsp; <b>SHIFT</b> run &nbsp; <b>E</b> board / get off</div>
       <div><b>TAB</b> network map &nbsp; <b>R</b> unstick</div>
       <div id="status-net">connecting…</div>
     </div>

@@ -11,10 +11,10 @@
  */
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
-  ARRIVE_RADIUS, BOARD_RADIUS, BROADCAST_HZ, PALETTE, RACE, TICK_HZ, WS_PORT,
+  ARRIVE_RADIUS, BOARD_RADIUS, BROADCAST_HZ, PALETTE, RACE, STAMINA, TICK_HZ, WS_PORT,
 } from '../shared/constants.js';
 import { buildCity } from '../shared/city.js';
-import { stepWalk, type Walker } from '../shared/movement.js';
+import { newWalker, stepWalk, type Walker } from '../shared/movement.js';
 import { allVehicles, vehicleById } from '../shared/vehicles.js';
 import type { C2SMessage, City, PlayerState, S2CMessage, WorldState } from '../shared/types.js';
 
@@ -24,12 +24,18 @@ type Client = {
   wx: number;
   wy: number;
   facing: number;
+  sprint: boolean;
 };
 
 const clients = new Map<string, Client>();
 const players = new Map<string, PlayerState>();
-/** Velocity is server-only; nobody else needs it and it doubles the packet. */
-const vel = new Map<string, { vx: number; vy: number }>();
+/**
+ * Velocity and stamina live here rather than in PlayerState — velocity because
+ * nobody else needs it, stamina because the server is the only thing allowed
+ * to decide how much of it you have. A copy of the latter is published each
+ * tick so the bar has something to draw and a rival's dash is readable.
+ */
+const walkers = new Map<string, Walker>();
 
 let city: City = buildCity(newSeed());
 let roundIndex = 1;
@@ -53,7 +59,9 @@ function spawn(p: PlayerState) {
   p.riding = null;
   p.finished = null;
   p.place = 0;
-  vel.set(p.id, { vx: 0, vy: 0 });
+  p.stamina = 1;
+  p.sprinting = false;
+  walkers.set(p.id, newWalker(p.x, p.y));
 }
 
 function startRound() {
@@ -92,7 +100,7 @@ function interact(p: PlayerState) {
       p.x = s.x + Math.cos(a) * 7;
       p.y = s.y + Math.sin(a) * 7;
       p.riding = null;
-      vel.set(p.id, { vx: 0, vy: 0 });
+      walkers.set(p.id, newWalker(p.x, p.y));
     }
     return;
   }
@@ -125,15 +133,26 @@ function tick(dt: number) {
       if (!v) { p.riding = null; continue; }
       p.x = v.x;
       p.y = v.y;
+      // Sitting down is resting: you get your legs back on the way, which is
+      // what makes spending the whole tank on the first dash affordable.
+      const w = walkers.get(p.id);
+      if (w) {
+        w.sprinting = false;
+        w.stamina = Math.min(1, w.stamina + dt / STAMINA.recover);
+        p.stamina = w.stamina;
+        p.sprinting = false;
+      }
       continue;
     }
 
     const c = clients.get(p.id);
-    const w = vel.get(p.id) ?? { vx: 0, vy: 0 };
-    const walker: Walker = { x: p.x, y: p.y, vx: w.vx, vy: w.vy };
-    stepWalk(walker, c?.wx ?? 0, c?.wy ?? 0, dt, city.streets, city.river);
+    let walker = walkers.get(p.id);
+    if (!walker) { walker = newWalker(p.x, p.y); walkers.set(p.id, walker); }
+    walker.x = p.x; walker.y = p.y;
+    stepWalk(walker, c?.wx ?? 0, c?.wy ?? 0, dt, city.streets, city.river, c?.sprint ?? false);
     p.x = walker.x; p.y = walker.y;
-    vel.set(p.id, { vx: walker.vx, vy: walker.vy });
+    p.stamina = walker.stamina;
+    p.sprinting = walker.sprinting;
     if (c) p.facing = c.facing;
 
     // You finish on your feet. The last leg of every race is a walk from the
@@ -173,10 +192,11 @@ wss.on('connection', (socket) => {
   const color = PALETTE[(nextId - 2) % PALETTE.length];
   const player: PlayerState = {
     id, name: `Player ${nextId - 1}`, color,
-    x: 0, y: 0, facing: 0, riding: null, finished: null, place: 0,
+    x: 0, y: 0, facing: 0, riding: null, stamina: 1, sprinting: false,
+    finished: null, place: 0,
   };
   players.set(id, player);
-  clients.set(id, { id, socket, wx: 0, wy: 0, facing: 0 });
+  clients.set(id, { id, socket, wx: 0, wy: 0, facing: 0, sprint: false });
   spawn(player);
 
   const send = (m: S2CMessage) => socket.send(JSON.stringify(m));
@@ -193,6 +213,7 @@ wss.on('connection', (socket) => {
       c.wx = len > 1 ? msg.wx / len : msg.wx;
       c.wy = len > 1 ? msg.wy / len : msg.wy;
       c.facing = msg.facing;
+      c.sprint = !!msg.sprint;
     } else if (msg.type === 'action') {
       if (msg.action === 'interact') interact(player);
       else if (msg.action === 'reset') spawn(player);
@@ -204,7 +225,7 @@ wss.on('connection', (socket) => {
   socket.on('close', () => {
     clients.delete(id);
     players.delete(id);
-    vel.delete(id);
+    walkers.delete(id);
     console.log(`- ${id} (${players.size} playing)`);
   });
 });

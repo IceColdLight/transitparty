@@ -40,12 +40,13 @@ const o = city.stops[city.origin];
 
 /** Two on the platform and one already moving, so every case gets drawn. */
 const players: PlayerState[] = [
-  { id: 'p1', name: 'You', color: '#ff5c5c', x: o.x + 6, y: o.y + 4, facing: 0, riding: null, finished: null, place: 0 },
-  { id: 'p2', name: 'Ada', color: '#5cc8ff', x: o.x - 14, y: o.y + 9, facing: 0, riding: null, finished: null, place: 0 },
+  { id: 'p1', name: 'You', color: '#ff5c5c', x: o.x + 6, y: o.y + 4, facing: 0, riding: null, stamina: 1, sprinting: false, finished: null, place: 0 },
+  // Ada is legging it, so the speed lines get drawn.
+  { id: 'p2', name: 'Ada', color: '#5cc8ff', x: o.x - 34, y: o.y + 4, facing: 0, riding: null, stamina: 0.6, sprinting: true, finished: null, place: 0 },
 ];
 const rider = vehicles.find((v) => v.atStop < 0);
 if (rider) {
-  players.push({ id: 'p3', name: 'Bo', color: '#a4ff5c', x: rider.x, y: rider.y, facing: 0, riding: rider.id, finished: null, place: 0 });
+  players.push({ id: 'p3', name: 'Bo', color: '#a4ff5c', x: rider.x, y: rider.y, facing: 0, riding: rider.id, stamina: 0.55, sprinting: false, finished: null, place: 0 });
 }
 
 function shot(name: string, w: number, h: number, fn: (ctx: SKRSContext2D) => void) {

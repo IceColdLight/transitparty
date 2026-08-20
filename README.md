@@ -72,6 +72,7 @@ interpolation buffer.
 | Key | |
 | --- | --- |
 | `WASD` | walk |
+| `SHIFT` | run — a few seconds' worth, then you need a rest |
 | `E` | board / get off |
 | `TAB` | **hold** for the network map |
 | `R` | unstick yourself |
@@ -96,6 +97,14 @@ the wrong crossing is a mistake you cannot walk off.
 **The doors matter.** A vehicle can only be boarded while it is standing at a
 stop with its doors open — four to eight seconds depending on what it is, and
 double that at a terminus. You cannot step off one in motion.
+
+**Run for the doors.** `SHIFT` is worth about 70% more speed and you get
+roughly three and a half seconds of it — one platform's worth, forty-odd
+metres. From forty metres out you miss a bus walking and catch it running,
+which is the entire reason the key exists. It takes four times as long to earn
+back as it does to spend, so it is a decision, not a gear: spend it here, or
+keep it for the change at the far end. The bar is under the prompt, and
+everyone can see everyone else's dash.
 
 **You walk on streets, not through buildings.** The city is a grid of blocks
 and you go round them, so the distance to a stop is rarely the distance to a

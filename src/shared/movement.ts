@@ -2,11 +2,20 @@
  * Walking. Shared, because the client predicts it and the server decides it,
  * and the two have to agree about where the pavement is.
  */
-import { CITY, WALK } from './constants.js';
+import { CITY, STAMINA, WALK } from './constants.js';
 import { type River, illegalCrossing } from './river.js';
 import { type Streets, onStreet, snapToStreet } from './streets.js';
 
-export type Walker = { x: number; y: number; vx: number; vy: number };
+export type Walker = {
+  x: number; y: number; vx: number; vy: number;
+  /** 0..1 */
+  stamina: number;
+  /** whether the sprint is actually running — see the latch in stepWalk */
+  sprinting: boolean;
+};
+
+export const newWalker = (x: number, y: number): Walker =>
+  ({ x, y, vx: 0, vy: 0, stamina: 1, sprinting: false });
 
 /**
  * One fixed step of walking. `wx, wy` is a world-space wish direction, already
@@ -21,8 +30,23 @@ export type Walker = { x: number; y: number; vx: number; vy: number };
  */
 export function stepWalk(
   p: Walker, wx: number, wy: number, dt: number, streets: Streets, river: River,
+  wantSprint = false,
 ): void {
-  const tx = wx * WALK.speed, ty = wy * WALK.speed;
+  /**
+   * The latch: starting a sprint needs `floor` in the tank, continuing one
+   * only needs something. Without the asymmetry, tapping the key every other
+   * frame is a permanent speed boost with a stutter — faster than sprinting
+   * properly, and unreadable to everybody watching you do it.
+   */
+  const moving = wx !== 0 || wy !== 0;
+  p.sprinting = moving && wantSprint
+    && (p.sprinting ? p.stamina > 0 : p.stamina >= STAMINA.floor);
+
+  if (p.sprinting) p.stamina = Math.max(0, p.stamina - dt / STAMINA.burst);
+  else p.stamina = Math.min(1, p.stamina + dt / STAMINA.recover);
+
+  const speed = p.sprinting ? WALK.speed * WALK.sprint : WALK.speed;
+  const tx = wx * speed, ty = wy * speed;
   const k = Math.min(1, WALK.accel * dt);
   p.vx += (tx - p.vx) * k;
   p.vy += (ty - p.vy) * k;

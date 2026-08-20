@@ -15,13 +15,13 @@
  * the last packet gave them — which is both exact and free, and is why a tram
  * full of racers moves as one solid object instead of a shivering cloud.
  */
-import { ARRIVE_RADIUS, BOARD_RADIUS, INTERP_DELAY_MS, RACE } from '../shared/constants.js';
+import { ARRIVE_RADIUS, BOARD_RADIUS, INTERP_DELAY_MS, RACE, STAMINA } from '../shared/constants.js';
 import { buildCity } from '../shared/city.js';
-import { stepWalk, type Walker } from '../shared/movement.js';
+import { newWalker, stepWalk } from '../shared/movement.js';
 import { allVehicles, vehicleById } from '../shared/vehicles.js';
 import type { City, PlayerState, Vehicle, WorldState } from '../shared/types.js';
 import { connect } from './net.js';
-import { mapHeld, readWalkWish, take } from './input.js';
+import { mapHeld, readWalkWish, sprintHeld, take } from './input.js';
 import { drawWorld, type Camera } from './world.js';
 import { drawMap } from './map.js';
 
@@ -44,6 +44,8 @@ const odFrom = el('od-from'), odTo = el('od-to'), clockEl = el('clock'), parEl =
 const sWhat = el('s-what'), sNext = el('s-next'), sTogo = el('s-togo');
 const standingsEl = el('standings'), promptEl = el('prompt');
 const netEl = el('status-net'), nameEl = el<HTMLInputElement>('name');
+const staminaEl = el('stamina'), stamFill = el<HTMLDivElement>('stam-fill');
+const stamLabel = el('stam-label');
 const resultsEl = el('results'), rTitle = el('r-title'), rSub = el('r-sub');
 const rRows = el('r-rows'), rNext = el('r-next');
 const mapHintEl = el('maphint');
@@ -70,7 +72,7 @@ let curr: WorldState | null = null;
 let simTime = 0;
 
 /** Local prediction of your own walking, corrected softly toward the server. */
-const me: Walker = { x: 0, y: 0, vx: 0, vy: 0 };
+const me = newWalker(0, 0);
 let mePrimed = false;
 
 const cam: Camera = { x: 0, y: 0, scale: 1.6 };
@@ -188,10 +190,11 @@ function frame(now: number) {
   if (server && !mePrimed) { me.x = server.x; me.y = server.y; me.vx = 0; me.vy = 0; mePrimed = true; }
 
   const wish = racing && !myVehicle && server?.finished === null ? readWalkWish() : { x: 0, y: 0 };
+  const sprinting = sprintHeld();
   if (myVehicle) {
     me.x = myVehicle.x; me.y = myVehicle.y; me.vx = 0; me.vy = 0;
   } else if (server) {
-    stepWalk(me, wish.x, wish.y, dt, c.streets, c.river);
+    stepWalk(me, wish.x, wish.y, dt, c.streets, c.river, sprinting);
     // Soft reconciliation. The walk is cheap and deterministic, so the two
     // only ever differ by a packet's worth of lag; yanking would be visible
     // and drifting would not.
@@ -199,9 +202,20 @@ function frame(now: number) {
     me.y += (server.y - me.y) * Math.min(1, dt * 6);
   }
 
-  net.send({ type: 'walk', seq: 0, wx: wish.x, wy: wish.y, facing: Math.atan2(wish.y, wish.x) });
+  net.send({
+    type: 'walk', seq: 0, wx: wish.x, wy: wish.y,
+    facing: Math.atan2(wish.y, wish.x), sprint: sprinting,
+  });
   if (take('interact')) net.send({ type: 'action', action: 'interact' });
   if (take('reset')) net.send({ type: 'action', action: 'reset' });
+
+  /**
+   * Stamina is the SERVER's number, always — it is a resource and a predicted
+   * one would let a laggy client sprint further than everyone else. The
+   * prediction runs its own copy so the local speed is right on the frame you
+   * press the key, and then defers.
+   */
+  if (server) me.stamina = server.stamina;
 
   // ── camera: pulled back while riding, because you are covering ground ────
   const wantScale = myVehicle ? 0.85 : 1.6;
@@ -253,6 +267,17 @@ function frame(now: number) {
   }
   const togo = Math.hypot(dest.x - me.x, dest.y - me.y);
   sTogo.textContent = `${Math.round(togo)}m · ${dest.name}`;
+
+  // ── stamina ─────────────────────────────────────────────────────────────
+  const stam = server?.stamina ?? 1;
+  staminaEl.style.opacity = myVehicle || !racing ? '0.28' : '0.92';
+  stamFill.style.width = `${(stam * 100).toFixed(1)}%`;
+  // Three states, because "can I start a sprint" is a different question from
+  // "am I nearly out": below the floor the key does nothing at all, and a bar
+  // that only faded would leave you jabbing at it.
+  const spent = stam < STAMINA.floor && !server?.sprinting;
+  stamFill.className = spent ? 'spent' : stam < 0.4 ? 'low' : '';
+  stamLabel.textContent = spent ? 'winded' : server?.sprinting ? 'running' : 'shift to run';
 
   // ── the prompt: one line, one key ───────────────────────────────────────
   if (!racing) promptEl.innerHTML = '';
