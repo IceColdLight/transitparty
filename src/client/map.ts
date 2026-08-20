@@ -121,15 +121,15 @@ export function drawMap(
       pts.forEach((q, i2) => (i2 === 0 ? ctx.moveTo(q.x, q.y) : ctx.lineTo(q.x, q.y)));
       ctx.stroke();
 
-      ctx.font = '600 9px system-ui, sans-serif';
-      ctx.fillStyle = 'rgba(190, 205, 220, 0.42)';
+      ctx.font = '700 12px system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(200, 214, 228, 0.62)';
       ctx.textAlign = 'center';
       let since = 1e9;
       for (let i2 = 1; i2 < pts.length; i2++) {
         const a2 = pts[i2 - 1], b2 = pts[i2];
         const seg = Math.hypot(b2.x - a2.x, b2.y - a2.y);
         since += seg;
-        if (since < 240) continue;
+        if (since < 300) continue;
         const mid = { x: (a2.x + b2.x) / 2, y: (a2.y + b2.y) / 2 };
         if (mid.x < 8 || mid.x > view.w - 8 || mid.y < 8 || mid.y > view.h - 8) continue;
         since = 0;

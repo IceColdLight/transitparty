@@ -158,6 +158,8 @@ export type PlayerState = {
   stamina: number;
   /** actually sprinting right now, for the trail on their token */
   sprinting: boolean;
+  /** debug: off the ground and through the scenery */
+  flying: boolean;
   /** seconds after the gun they crossed the line, or null */
   finished: number | null;
   /** finishing position, 1-based, or 0 */
@@ -193,7 +195,15 @@ export type C2SWalk = {
   sprint: boolean;
   /** holding the jump key */
   jump: boolean;
+  /** vertical wish while flying: +1 rising, -1 descending, 0 holding height */
+  lift: number;
 };
+
+/**
+ * Debug only: flying about the city under no gravity and through anything.
+ * For looking at the world, not for playing it.
+ */
+export type C2SAction = { type: 'action'; action: 'fly' };
 /**
  * The client can say two things: where it is trying to walk, and what to call
  * itself. There is no board key — you get on things by walking onto them —
@@ -201,7 +211,7 @@ export type C2SWalk = {
  * shared/movement.ts.
  */
 export type C2SName = { type: 'name'; name: string };
-export type C2SMessage = C2SWalk | C2SName;
+export type C2SMessage = C2SWalk | C2SAction | C2SName;
 
 export type S2CWelcome = {
   type: 'welcome';

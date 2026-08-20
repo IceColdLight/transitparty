@@ -27,6 +27,7 @@ type Client = {
   facing: number;
   sprint: boolean;
   jump: boolean;
+  lift: number;
 };
 
 const clients = new Map<string, Client>();
@@ -77,6 +78,7 @@ function spawn(p: PlayerState) {
   p.h = 0;
   p.grounded = true;
   p.riding = null;
+  p.flying = false;
   p.finished = null;
   p.place = 0;
   p.stamina = 1;
@@ -130,12 +132,13 @@ function tick(dt: number) {
 
     stepBody(body, {
       wx: c?.wx ?? 0, wy: c?.wy ?? 0,
-      sprint: c?.sprint ?? false, jump: c?.jump ?? false,
+      sprint: c?.sprint ?? false, jump: c?.jump ?? false, lift: c?.lift ?? 0,
     }, dt, ground);
 
     p.x = body.x; p.y = body.y; p.h = body.h;
     p.grounded = body.grounded;
     p.riding = body.riding;
+    p.flying = body.flying;
     p.sprinting = body.sprinting;
     // Sitting down is resting: you get your legs back on the way, which is
     // what makes spending the whole tank on the first dash affordable.
@@ -182,10 +185,10 @@ wss.on('connection', (socket) => {
   const player: PlayerState = {
     id, name: `Player ${nextId - 1}`, color,
     x: 0, y: 0, h: 0, facing: 0, grounded: true, riding: null,
-    stamina: 1, sprinting: false, finished: null, place: 0,
+    stamina: 1, sprinting: false, flying: false, finished: null, place: 0,
   };
   players.set(id, player);
-  clients.set(id, { id, socket, wx: 0, wy: 0, facing: 0, sprint: false, jump: false });
+  clients.set(id, { id, socket, wx: 0, wy: 0, facing: 0, sprint: false, jump: false, lift: 0 });
   spawn(player);
 
   const send = (m: S2CMessage) => socket.send(JSON.stringify(m));
@@ -204,6 +207,17 @@ wss.on('connection', (socket) => {
       c.facing = msg.facing;
       c.sprint = !!msg.sprint;
       c.jump = !!msg.jump;
+      c.lift = Math.max(-1, Math.min(1, msg.lift ?? 0));
+    } else if (msg.type === 'action') {
+      /**
+       * Debug only. It is server-side because the server owns position: a
+       * client that flew on its own would spend every tick being pulled back
+       * down by the correction.
+       */
+      if (msg.action === 'fly') {
+        const body = bodies.get(id);
+        if (body) { body.flying = !body.flying; player.flying = body.flying; }
+      }
     } else if (msg.type === 'name') {
       player.name = String(msg.name).slice(0, 16) || player.name;
     }

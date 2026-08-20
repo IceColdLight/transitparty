@@ -41,9 +41,15 @@ export type Body = {
   grounded: boolean;
   /** id of the vehicle under your feet, or null for solid ground */
   riding: string | null;
+  /** debug: no gravity, no floor, through anything */
+  flying: boolean;
 };
 
-export type MoveInput = { wx: number; wy: number; sprint: boolean; jump: boolean };
+export type MoveInput = {
+  wx: number; wy: number; sprint: boolean; jump: boolean;
+  /** vertical wish while flying */
+  lift?: number;
+};
 
 /** Everything the step needs to know about the world it is stepping through. */
 export type Ground = {
@@ -74,7 +80,7 @@ function standable(g: Ground, x: number, y: number, feet: number): boolean {
 
 export const newBody = (x: number, y: number): Body => ({
   x, y, h: 0, vx: 0, vy: 0, vh: 0,
-  stamina: 1, sprinting: false, grounded: true, riding: null,
+  stamina: 1, sprinting: false, grounded: true, riding: null, flying: false,
 });
 
 /**
@@ -109,6 +115,24 @@ function throughSide(
 }
 
 export function stepBody(p: Body, input: MoveInput, dt: number, g: Ground): void {
+  /**
+   * Flying is a debug tool and behaves like one: no gravity, no floor, through
+   * anything. It is deliberately the FIRST thing in the step, so none of the
+   * rules below — streets, bodywork, cabin walls, decks — get a say.
+   */
+  if (p.flying) {
+    const speed = WALK.speed * (input.sprint ? 5 : 2.2);
+    p.riding = null;
+    p.grounded = false;
+    p.vx = 0; p.vy = 0; p.vh = 0;
+    p.x = Math.min(CITY.width, Math.max(0, p.x + input.wx * speed * dt));
+    p.y = Math.min(CITY.height, Math.max(0, p.y + input.wy * speed * dt));
+    p.h = Math.min(400, Math.max(-40, p.h + (input.lift ?? 0) * speed * dt));
+    p.stamina = 1;
+    p.sprinting = false;
+    return;
+  }
+
   const moving = input.wx !== 0 || input.wy !== 0;
 
   // ── stamina. The latch: starting a sprint needs a floor, continuing needs

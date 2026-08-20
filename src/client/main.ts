@@ -109,6 +109,7 @@ function refreshMap(city: City, vehicles: ReturnType<typeof allVehicles>, player
 const keys = new Set<string>();
 let facing = 0, pitch = 0;
 let locked = false;
+let lastSpace = 0;
 
 const typing = () => document.activeElement?.tagName === 'INPUT';
 addEventListener('keydown', (e) => {
@@ -118,6 +119,16 @@ addEventListener('keydown', (e) => {
   }
   const k = e.key.toLowerCase();
   if (k === 'tab' || k === ' ') e.preventDefault();
+  /**
+   * Two taps of the space bar turns flying on and off. A debug key that is
+   * also the jump key, so it can never be pressed by accident in a single
+   * motion — and nothing in the UI mentions it.
+   */
+  if (k === ' ' && !keys.has(k)) {
+    const now = performance.now();
+    if (now - lastSpace < 320) net.send({ type: 'action', action: 'fly' });
+    lastSpace = now;
+  }
   keys.add(k);
 });
 addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
@@ -350,11 +361,17 @@ function frame(now: number) {
   const wish = canMove ? walkWish() : { x: 0, y: 0 };
   const sprint = canMove && held('shift');
   const jump = canMove && held(' ');
-  stepBody(me, { wx: wish.x, wy: wish.y, sprint, jump }, dt, {
+  // While flying, W/S follow where you are LOOKING, and the pitch of that look
+  // is the climb — which is the whole reason to be up there.
+  const lift = me.flying && canMove
+    ? (held(' ') ? 1 : 0) - (held('shift') ? 1 : 0) || Math.sin(pitch) * (held('w') ? 1 : held('s') ? -1 : 0)
+    : 0;
+  stepBody(me, { wx: wish.x, wy: wish.y, sprint, jump, lift }, dt, {
     streets: c.streets, river: c.river, transit: { city: c, vehicles, time: simTime },
   });
 
   if (server) {
+    me.flying = server.flying;
     // Stamina is the server's number, always: a predicted resource lets a
     // laggy client sprint further than everybody else.
     me.stamina = server.stamina;
@@ -401,7 +418,7 @@ function frame(now: number) {
 
   net.send({
     type: 'walk', seq: 0, wx: wish.x, wy: wish.y, facing,
-    sprint, jump,
+    sprint, jump, lift,
   });
 
   // ── camera ──────────────────────────────────────────────────────────────
@@ -410,7 +427,7 @@ function frame(now: number) {
   scene3d.setViewer(camera.position.x, camera.position.y, camera.position.z);
 
   const people = othersAt(simTime - interpDelay, simTime);
-  scene3d.updateVehicles(c, vehicles);
+  scene3d.updateVehicles(c, vehicles, dt);
   scene3d.updatePlayers(people, selfId);
 
   // ── the map in your hands ───────────────────────────────────────────────

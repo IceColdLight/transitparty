@@ -91,7 +91,7 @@ export type Scene3D = {
   /** keep the sky centred on whoever is looking; call it every frame */
   setViewer(x: number, y: number, z: number): void;
   /** call each frame with the current fleet */
-  updateVehicles(city: City, vehicles: Vehicle[]): void;
+  updateVehicles(city: City, vehicles: Vehicle[], dt: number): void;
   updatePlayers(players: PlayerState[], selfId: string): void;
   dispose(): void;
 };
@@ -954,6 +954,13 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
   // ── vehicles. The fleet is fixed for the life of a city, so build every
   //    body once and only move it afterwards.
   const vehicleMeshes = new Map<string, THREE.Mesh>();
+  /**
+   * Door leaves, one per doorway per side, kept out of the merged shell so
+   * they can move. Doors were a hole in the bodywork that was always there,
+   * which meant the one rule you have to read off a vehicle — can I get out —
+   * had no picture. They slide now: shut while it runs, open at a stop.
+   */
+  const doorLeaves = new Map<string, { leaves: THREE.Mesh[]; open: number }>();
   const lineMats = city.lines.map((l) => keep(new THREE.MeshLambertMaterial({ color: l.color })));
   const glassMat = keep(new THREE.MeshLambertMaterial({ color: 0x16202b }));
   /**
@@ -1153,8 +1160,31 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
       board.rotation.y = Math.PI / 2;
       g.add(board);
 
+      const leafH = line.mode === 'metro' || line.mode === 'train' ? 2.1 : b.wall;
+      const leafGeo = keep(new THREE.BoxGeometry(b.doorWidth * 0.52, leafH, 0.14));
+      const leaves: THREE.Mesh[] = [];
+      for (const d of b.doors) {
+        for (const side of [-1, 1]) {
+          // Bi-parting: two leaves that slide apart into the panels either side.
+          for (const half of [-1, 1]) {
+            const leaf = new THREE.Mesh(leafGeo, lineMats[line.id]);
+            leaf.position.set(
+              d * b.l + half * b.doorWidth * 0.26,
+              b.deck + leafH / 2,
+              side * (b.w / 2 - 0.08),
+            );
+            leaf.userData.shut = leaf.position.x;
+            leaf.userData.slide = half * b.doorWidth * 0.5;
+            g.add(leaf);
+            leaves.push(leaf);
+          }
+        }
+      }
+
       scene.add(g);
-      vehicleMeshes.set(`${line.id}.${run}`, g);
+      const id = `${line.id}.${run}`;
+      vehicleMeshes.set(id, g);
+      doorLeaves.set(id, { leaves, open: 0 });
     }
   }
 
@@ -1169,8 +1199,19 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
       if (skyMesh) skyMesh.position.set(x, y, z);
     },
 
-    updateVehicles(_city, vehicles) {
+    updateVehicles(_city, vehicles, dt) {
       for (const v of vehicles) {
+        const doors = doorLeaves.get(v.id);
+        if (doors) {
+          // A door takes about a third of a second either way, which is short
+          // enough to sprint for and long enough to see happen.
+          const want = v.atStop >= 0 ? 1 : 0;
+          const k = Math.min(1, dt * 3.2);
+          doors.open += (want - doors.open) * k;
+          for (const leaf of doors.leaves) {
+            leaf.position.x = leaf.userData.shut + leaf.userData.slide * doors.open;
+          }
+        }
         const mesh = vehicleMeshes.get(v.id);
         if (!mesh) continue;
         // At its own level: a metro is in a tunnel, a train is on a viaduct.

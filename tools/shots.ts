@@ -105,9 +105,9 @@ const origin = city.stops[city.origin];
 const pad = platformAt(city.streets, origin, city.origin);
 const people: PlayerState[] = [
   { id: 'p2', name: 'Ada', color: '#5cc8ff', x: pad.x + 4, y: pad.y + 6, h: 0, facing: 1,
-    grounded: true, riding: null, stamina: 0.6, sprinting: true, finished: null, place: 0 },
+    grounded: true, riding: null, stamina: 0.6, sprinting: true, flying: false, finished: null, place: 0 },
 ];
-built.updateVehicles(city, vehicles);
+built.updateVehicles(city, vehicles, 1);
 built.updatePlayers(people, 'p1');
 
 function shoot(name: string, x: number, y: number, h: number, look: number, pitch = 0) {

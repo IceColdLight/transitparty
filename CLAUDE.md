@@ -361,8 +361,11 @@ you stood — and getting the conversion wrong is silent in both directions.
 
 Four rules sit on top of it:
 
-- **A vehicle is a room with doors**, and on foot the doors are the only way
-  through the walls. They are open exactly while it is standing at a stop. That
+- **A vehicle is a room with doors** — real ones, that slide shut when it runs
+  and part when it stops. They were a permanent hole in the bodywork for a
+  long time, which meant the one rule you have to read off a vehicle, can I get
+  out, had no picture at all. On foot the doors are the only way through the
+  walls. They are open exactly while it is standing at a stop. That
   one fact turns getting off at the right place into something you plan a few
   seconds ahead — be near a door, or spend the dwell walking to one and watch
   your stop go past.
@@ -594,6 +597,12 @@ the city can actually be read. So:
 - **Every interchange is labelled on the map**, not just the busiest ones, and
   the labels are laid out greedily so none is buried under another. A name you
   cannot read is a name that is not there.
+
+There is also a fly mode for looking at the city — two taps of the space bar,
+mentioned nowhere in the UI. It is server-side, because the server owns
+position and a client flying on its own would spend every tick being pulled
+back down by the correction; and it is the FIRST thing in `stepBody`, so none
+of the rules below it — streets, bodywork, cabin walls, decks — get a say.
 
 Rivals stay on the map. Watching somebody take the wrong bridge is most of the
 point of racing, and if one is standing next to you and gives your position
