@@ -22,9 +22,22 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { BODIES, CITY, LANES, LEVELS, PLATFORM, type ModeId } from '../shared/constants.js';
-import { platformAt } from '../shared/streets.js';
+import { onStreet, platformAt } from '../shared/streets.js';
+import { nearestOnRiver } from '../shared/river.js';
+import { inRect } from '../shared/stations.js';
 import { VIADUCT_CLEARANCE, footprintsOf, hash2, viaductLegs } from '../shared/plots.js';
 import type { City, PlayerState, Vehicle } from '../shared/types.js';
+
+/**
+ * How far the pavement stands proud of the carriageway.
+ *
+ * Barely anything, and deliberately: walking is flat — there is one ground
+ * plane and the kerb is not in it — so a step you could trip over is a step
+ * the player walks straight through. Everything else laid on the pavement
+ * (the boarding platforms) starts from here rather than from the road, or it
+ * ends up buried inside it.
+ */
+const FOOTWAY = 0.16;
 
 /** Horizon and zenith. The fog takes the horizon colour so distance dissolves into it. */
 const SKY_LOW = 0xa8c8e8;
@@ -177,6 +190,61 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
   };
 
   /**
+   * Every hole in the pavement: the mouth of each stairwell that goes DOWN.
+   *
+   * The ground is cut for these, and so is everything else laid on top of it —
+   * the footways and the boarding platforms. They are not decoration on the
+   * road, they ARE the road at that point, and paving one over the top of a
+   * subway entrance puts the stairs back underneath a solid surface, which is
+   * how the entrance came to be invisible the first time.
+   *
+   * Axis-aligned, because a shaft runs along its street.
+   */
+  const holePad = 0.6;
+  const groundHoles = city.stations
+    .filter((st) => st.level < 0)
+    .map((st) => {
+      const c = Math.abs(Math.cos(st.shaft.angle)), sn = Math.abs(Math.sin(st.shaft.angle));
+      const hx = (st.shaft.hl + holePad) * c + (st.shaft.hw + holePad) * sn;
+      const hy = (st.shaft.hl + holePad) * sn + (st.shaft.hw + holePad) * c;
+      return { x0: st.shaft.x - hx, x1: st.shaft.x + hx, y0: st.shaft.y - hy, y1: st.shaft.y + hy };
+    });
+
+  /**
+   * What is left of a run from `lo` to `hi` once the holes crossing it are
+   * taken out. One strip in, none or more strips out.
+   */
+  const cutRun = (
+    lo: number, hi: number, crossLo: number, crossHi: number, vertical: boolean,
+  ): [number, number][] => {
+    let spans: [number, number][] = [[lo, hi]];
+    for (const h of groundHoles) {
+      const [a, b] = vertical ? [h.y0, h.y1] : [h.x0, h.x1];
+      const [ca, cb] = vertical ? [h.x0, h.x1] : [h.y0, h.y1];
+      if (cb <= crossLo || ca >= crossHi) continue;
+      const next: [number, number][] = [];
+      for (const [s0, s1] of spans) {
+        if (b <= s0 || a >= s1) { next.push([s0, s1]); continue; }
+        if (a > s0) next.push([s0, a]);
+        if (b < s1) next.push([b, s1]);
+      }
+      spans = next;
+    }
+    return spans;
+  };
+
+  /**
+   * Open water, away from a bridge — where nothing built on the ground plane
+   * belongs. A footway running the length of its street laid a kerb straight
+   * across the river and out the other side, and the fence beside a viaduct
+   * did the same.
+   */
+  const overWater = (x: number, y: number) => {
+    if (nearestOnRiver(city.river, { x, y }).dist > 42) return false;
+    return !city.river.bridges.some((b) => Math.hypot(b.x - x, b.y - y) < CITY.bridgeRadius);
+  };
+
+  /**
    * The ground, with a hole cut through it at every stairwell that goes DOWN.
    *
    * It used to be one unbroken plane, which meant the road was paved over the
@@ -189,7 +257,7 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
    */
   const groundMat = keep(new THREE.MeshLambertMaterial({ color: 0x4a5058 }));
   {
-    const pad = 0.6;
+    const pad = holePad;
     const shape = new THREE.Shape();
     const x0 = -CITY.width * 0.3, x1 = CITY.width * 1.3;
     const z0 = -CITY.height * 0.3, z1 = CITY.height * 1.3;
@@ -345,20 +413,38 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
     }
   }
 
-  // A fence either side of the viaduct's land, for the same reason.
+  /**
+   * A fence either side of the viaduct's land, for the same reason.
+   *
+   * In panels, not in one run per leg: a viaduct crosses a road every couple
+   * of hundred metres, and a single box the length of the leg puts a metre and
+   * a half of timber straight across the carriageway — a wall standing in the
+   * road that a pedestrian walks through, which is worse than no fence at all.
+   * It stops at the kerb and starts again on the far side.
+   */
   {
     const posts: THREE.BufferGeometry[] = [];
+    const PANEL = 8;
     for (const seg of railSegs) {
       const dx = seg.bx - seg.ax, dy = seg.by - seg.ay;
       const len = Math.hypot(dx, dy);
       if (len < 4) continue;
       const ang = Math.atan2(dy, dx);
+      const ux = dx / len, uy = dy / len;
+      const nx = -uy, ny = ux;
       for (const side of [-1, 1]) {
-        const g = new THREE.BoxGeometry(len, 1.3, 0.5);
-        g.translate(0, 0.65, side * CLEARANCE);
-        g.rotateY(-ang);
-        g.translate((seg.ax + seg.bx) / 2, 0, (seg.ay + seg.by) / 2);
-        posts.push(g);
+        for (let t = 0; t + PANEL <= len; t += PANEL) {
+          const m = t + PANEL / 2;
+          const px = seg.ax + ux * m + nx * side * CLEARANCE;
+          const py = seg.ay + uy * m + ny * side * CLEARANCE;
+          if (onStreet(city.streets, { x: px, y: py })) continue;
+          if (overWater(px, py)) continue;
+          const g = new THREE.BoxGeometry(PANEL - 0.4, 1.3, 0.5);
+          g.translate(0, 0.65, 0);
+          g.rotateY(-ang);
+          g.translate(px, 0, py);
+          posts.push(g);
+        }
       }
     }
     if (posts.length) {
@@ -389,31 +475,42 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
     const gap = half + 1;
 
     const run = (a: number, b: number, fixed: number, vertical: boolean) => {
-      const len = b - a;
-      if (len < 6) return;
+      if (b - a < 6) return;
       for (const side of [-1, 1]) {
-        const g = new THREE.BoxGeometry(
-          vertical ? walkW : len, 0.16, vertical ? len : walkW,
-        );
-        g.translate(
-          vertical ? fixed + side * mid : (a + b) / 2,
-          0.08,
-          vertical ? (a + b) / 2 : fixed + side * mid,
-        );
-        slabs.push(g);
+        const c = fixed + side * mid;
+        // Broken wherever the ground itself is, and wherever it would be
+        // paving across open water: the bridge carries its own deck.
+        for (const [s0, s1] of cutRun(a, b, c - walkW / 2, c + walkW / 2, vertical)) {
+          const len = s1 - s0;
+          if (len < 2) continue;
+          const mx = vertical ? c : (s0 + s1) / 2;
+          const my = vertical ? (s0 + s1) / 2 : c;
+          if (overWater(mx, my)) continue;
+          const g = new THREE.BoxGeometry(
+            vertical ? walkW : len, FOOTWAY, vertical ? len : walkW,
+          );
+          g.translate(mx, FOOTWAY / 2, my);
+          slabs.push(g);
+        }
       }
     };
 
+    // Between junctions, and in pieces short enough that "is this over the
+    // river" is a question with a useful answer.
+    const STEP = 24;
+    const paved = (a: number, b: number, fixed: number, vertical: boolean) => {
+      for (let t = a; t < b; t += STEP) run(t, Math.min(b, t + STEP), fixed, vertical);
+    };
     for (const x of city.streets.xs) {
       const cuts = [0, ...city.streets.ys, CITY.height];
       for (let i = 0; i + 1 < cuts.length; i++) {
-        run(cuts[i] + (i === 0 ? 0 : gap), cuts[i + 1] - (i + 2 === cuts.length ? 0 : gap), x, true);
+        paved(cuts[i] + (i === 0 ? 0 : gap), cuts[i + 1] - (i + 2 === cuts.length ? 0 : gap), x, true);
       }
     }
     for (const y of city.streets.ys) {
       const cuts = [0, ...city.streets.xs, CITY.width];
       for (let i = 0; i + 1 < cuts.length; i++) {
-        run(cuts[i] + (i === 0 ? 0 : gap), cuts[i + 1] - (i + 2 === cuts.length ? 0 : gap), y, false);
+        paved(cuts[i] + (i === 0 ? 0 : gap), cuts[i + 1] - (i + 2 === cuts.length ? 0 : gap), y, false);
       }
     }
 
@@ -507,11 +604,31 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
     const stands = Math.min(s.lines.length, LANES.berths);
     const long = PLATFORM.length + (stands - 1) * LANES.berth;
     const short = PLATFORM.width;
-    const mesh = new THREE.Mesh(keep(new THREE.BoxGeometry(
-      onVertical ? short : long, PLATFORM.height, onVertical ? long : short,
-    )), padMat);
-    mesh.position.set(pad.x, PLATFORM.height / 2, pad.y);
-    scene.add(mesh);
+    /**
+     * On TOP of the pavement, and broken where the pavement is.
+     *
+     * `STATION.entry` and `PLATFORM.offset` are within a metre of each other —
+     * both belong on the footway — so a rail stop's boarding island and its
+     * subway entrance are laid across one another. The island loses: it is the
+     * thing you can walk round, and a staircase you cannot see is a station
+     * you cannot use. Sitting it on the kerb rather than on the road matters
+     * too: at 60mm on a 160mm pavement the whole platform was buried.
+     */
+    const lo = (onVertical ? pad.y : pad.x) - long / 2;
+    const hi = lo + long;
+    const cLo = (onVertical ? pad.x : pad.y) - short / 2;
+    for (const [s0, s1] of cutRun(lo, hi, cLo, cLo + short, onVertical)) {
+      if (s1 - s0 < 2) continue;
+      const mesh = new THREE.Mesh(keep(new THREE.BoxGeometry(
+        onVertical ? short : s1 - s0, FOOTWAY + PLATFORM.height, onVertical ? s1 - s0 : short,
+      )), padMat);
+      mesh.position.set(
+        onVertical ? pad.x : (s0 + s1) / 2,
+        (FOOTWAY + PLATFORM.height) / 2,
+        onVertical ? (s0 + s1) / 2 : pad.y,
+      );
+      scene.add(mesh);
+    }
 
     /**
      * The sign goes on the BACK edge of the platform, away from the road.
@@ -641,11 +758,21 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
           place(tunnel, len, body.h + 2.6, span, level + (body.h + 2.6) / 2 - 0.5);
         } else {
           place(deckGeo, len, 1.1, span, level - 0.75);
+          /**
+           * Piers, but never in the carriageway. A column every thirty-four
+           * metres regardless of what is underneath drops a two-metre block of
+           * concrete into the middle of a junction; a real viaduct spans the
+           * road instead. If the spot is a street, the pier is skipped — the
+           * span either side of it is what carries the deck.
+           */
           for (let d = -len / 2 + 8; d < len / 2; d += 34) {
+            const px = mx + Math.cos(ang) * d, py = my + Math.sin(ang) * d;
+            if (onStreet(city.streets, { x: px, y: py })) continue;
+            if (overWater(px, py)) continue;
             const g = new THREE.BoxGeometry(2.2, level, 2.2);
-            g.translate(d, level / 2 - 1.2, 0);
+            g.translate(0, level / 2 - 1.2, 0);
             g.rotateY(-ang);
-            g.translate(mx, 0, my);
+            g.translate(px, 0, py);
             deckGeo.push(g);
           }
         }
@@ -813,16 +940,33 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
      * metro station read as a metro station at a glance.
      */
     const platHalf = Math.max(1.5, st.hall.hw - trackHalf) / 2;
+    /** Anywhere in the hall's own frame: +l along the platform, +w across it. */
+    const atHall = (l: number, w: number) => ({
+      x: st.hall.x + Math.cos(st.hall.angle) * l + Math.sin(-st.hall.angle) * w,
+      y: st.hall.y + Math.sin(st.hall.angle) * l + Math.cos(-st.hall.angle) * w,
+    });
+    const intoHall = (x: number, y: number) => {
+      const dx = x - st.hall.x, dy = y - st.hall.y;
+      const c = Math.cos(-st.hall.angle), sn = Math.sin(-st.hall.angle);
+      return { l: dx * c - dy * sn, w: dx * sn + dy * c };
+    };
+
+    /**
+     * The platform is a deck's depth THICK, not a slab lying on nothing.
+     *
+     * Its underside used to stop half a metre down while the track bed's top
+     * sat a deck lower, leaving a hundred-millimetre slot along the platform
+     * face — and since there is no geometry at all below a station, what came
+     * through that slot was the sky. A bright blue line down both edges of
+     * every underground platform.
+     */
     for (const side of [-1, 1]) {
-      const off = side * (trackHalf + platHalf);
+      const thick = 0.5 + deck;
       const m = new THREE.Mesh(
-        keep(new THREE.BoxGeometry(st.hall.hl * 2, 0.5, platHalf * 2)), floorMat,
+        keep(new THREE.BoxGeometry(st.hall.hl * 2, thick, platHalf * 2)), floorMat,
       );
-      m.position.set(
-        st.hall.x + Math.sin(-st.hall.angle) * off,
-        st.level - 0.25,
-        st.hall.y + Math.cos(-st.hall.angle) * off,
-      );
+      const p = atHall(0, side * (trackHalf + platHalf));
+      m.position.set(p.x, st.level - thick / 2, p.y);
       m.rotation.y = -st.hall.angle;
       scene.add(m);
     }
@@ -830,23 +974,78 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
       keep(new THREE.BoxGeometry(st.hall.hl * 2, 0.4, trackHalf * 2)), trackBed,
     ), st.hall, st.level - deck - 0.2);
 
-    // side walls and a ceiling, so a tunnel station feels like a room
+    /**
+     * Side walls with a doorway cut where the corridor arrives.
+     *
+     * The wall was one slab the length of the platform, so the passage from
+     * the stairs ran straight into it: you walked down, along a corridor, and
+     * through a wall. It is drawn in two pieces with a gap at the crossing
+     * instead — and the gap is found by intersecting the corridor's centre
+     * line with the wall, so it is in the right place whatever angle the
+     * stairs came in at.
+     */
+    const pMouth = {
+      x: st.passage.x - Math.cos(st.passage.angle) * st.passage.hl,
+      y: st.passage.y - Math.sin(st.passage.angle) * st.passage.hl,
+    };
+    const pEnd = {
+      x: st.passage.x + Math.cos(st.passage.angle) * st.passage.hl,
+      y: st.passage.y + Math.sin(st.passage.angle) * st.passage.hl,
+    };
+    const la = intoHall(pMouth.x, pMouth.y), lb = intoHall(pEnd.x, pEnd.y);
+    /**
+     * Down past the track bed and up to meet the ceiling. Stopping at platform
+     * level left a slot under the wall; stopping short of the ceiling left one
+     * over it, and either way what came through was daylight.
+     */
+    const wallTop = st.level + (st.mode === 'metro' ? 5.4 : 3.4);
+    const wallBot = st.level - deck - 0.6;
+    const wallH = wallTop - wallBot;
     for (const side of [-1, 1]) {
-      const w = new THREE.Mesh(
-        keep(new THREE.BoxGeometry(st.hall.hl * 2, 5.2, 0.5)), wallMat,
-      );
-      w.position.set(
-        st.hall.x + Math.sin(-st.hall.angle) * side * st.hall.hw,
-        st.level + 2.6,
-        st.hall.y + Math.cos(-st.hall.angle) * side * st.hall.hw,
-      );
-      w.rotation.y = -st.hall.angle;
-      scene.add(w);
+      const face = side * st.hall.hw;
+      let gap: [number, number] | null = null;
+      if ((la.w - face) * (lb.w - face) < 0) {
+        const u = (face - la.w) / (lb.w - la.w);
+        const at = la.l + (lb.l - la.l) * u;
+        const g = st.passage.hw + 0.8;
+        gap = [at - g, at + g];
+      }
+      const spans: [number, number][] = gap
+        ? [[-st.hall.hl, Math.min(st.hall.hl, gap[0])], [Math.max(-st.hall.hl, gap[1]), st.hall.hl]]
+        : [[-st.hall.hl, st.hall.hl]];
+      for (const [a, b] of spans) {
+        if (b - a < 0.5) continue;
+        const w = new THREE.Mesh(
+          keep(new THREE.BoxGeometry(b - a, wallH, 0.5)), wallMat,
+        );
+        const p = atHall((a + b) / 2, face);
+        w.position.set(p.x, (wallTop + wallBot) / 2, p.y);
+        w.rotation.y = -st.hall.angle;
+        scene.add(w);
+      }
     }
     if (st.mode === 'metro') {
       put(new THREE.Mesh(
         keep(new THREE.BoxGeometry(st.hall.hl * 2, 0.4, st.hall.hw * 2)), wallMat,
       ), st.hall, st.level + 5.2);
+      /**
+       * And the two ends, either side of the tunnel mouth. The bore is
+       * narrower than the hall — a platform is wider than a tunnel, that is
+       * what a platform IS — and the strips left over at each end were open to
+       * the sky, which underground is a hole in the world.
+       */
+      const boreHalf = trackHalf + 1.8;
+      for (const end of [-1, 1]) {
+        for (const side of [-1, 1]) {
+          const w = new THREE.Mesh(
+            keep(new THREE.BoxGeometry(0.6, wallH, st.hall.hw - boreHalf)), wallMat,
+          );
+          const p = atHall(end * st.hall.hl, side * (boreHalf + (st.hall.hw - boreHalf) / 2));
+          w.position.set(p.x, (wallTop + wallBot) / 2, p.y);
+          w.rotation.y = -st.hall.angle;
+          scene.add(w);
+        }
+      }
     }
 
     /**
@@ -855,51 +1054,119 @@ export function buildScene(city: City, opts: SceneOpts = {}): Scene3D {
      * staircase. The walkable surface underneath is the ramp; the steps sit on
      * it, which is close enough at this size that nobody will catch it out.
      */
+    const down = st.level < 0;
+    const atShaft = (l: number, w: number) => ({
+      x: st.shaft.x + Math.cos(st.shaft.angle) * l + Math.sin(-st.shaft.angle) * w,
+      y: st.shaft.y + Math.sin(st.shaft.angle) * l + Math.cos(-st.shaft.angle) * w,
+    });
     const steps = 14;
     for (let i = 0; i < steps; i++) {
       const t = (i + 0.5) / steps;
-      const lx = -st.shaft.hl + t * st.shaft.hl * 2;
-      const at = {
-        x: st.shaft.x + Math.cos(st.shaft.angle) * lx,
-        y: st.shaft.y + Math.sin(st.shaft.angle) * lx,
-      };
+      const at = atShaft(-st.shaft.hl + t * st.shaft.hl * 2, 0);
+      /**
+       * Deep treads, deliberately. A step drops further than half a metre at
+       * this depth, so half-metre-thick treads left a slot between each pair —
+       * and under a staircase there is nothing at all, so what showed through
+       * the slots was the sky. Overlapping them makes the flight solid.
+       */
+      const tread = Math.abs(st.level) / steps + 0.9;
       const g = new THREE.Mesh(
-        keep(new THREE.BoxGeometry(st.shaft.hl * 2 / steps, 0.5, st.shaft.hw * 2)), floorMat,
+        keep(new THREE.BoxGeometry(st.shaft.hl * 2 / steps, tread, st.shaft.hw * 2)), floorMat,
       );
-      g.position.set(at.x, st.level * t - 0.25, at.y);
+      g.position.set(at.x, st.level * t - tread / 2, at.y);
       g.rotation.y = -st.shaft.angle;
       scene.add(g);
-      // Walls down both sides, because the stairwell has them: you go in at
-      // the top and come out at the bottom, not over the side halfway down.
+      // A balustrade on a flight going UP. A flight going down gets a wall
+      // instead — see below — because it also has to hold the ground back.
+      if (down) continue;
       for (const side of [-1, 1]) {
+        const p = atShaft(-st.shaft.hl + t * st.shaft.hl * 2, side * st.shaft.hw);
         const w = new THREE.Mesh(
           keep(new THREE.BoxGeometry(st.shaft.hl * 2 / steps, 1.1, 0.3)), wallMat,
         );
-        w.position.set(
-          at.x + Math.sin(-st.shaft.angle) * side * st.shaft.hw,
-          st.level * t + 0.55,
-          at.y + Math.cos(-st.shaft.angle) * side * st.shaft.hw,
-        );
+        w.position.set(p.x, st.level * t + 0.55, p.y);
         w.rotation.y = -st.shaft.angle;
         scene.add(w);
       }
     }
 
-    // the passage from the foot of the stairs in to the platform
-    {
-      const pw = new THREE.Mesh(
-        keep(new THREE.BoxGeometry(st.passage.hl * 2, 0.4, st.passage.hw * 2)), floorMat,
-      );
-      pw.position.set(st.passage.x, st.level - 0.2, st.passage.y);
-      pw.rotation.y = -st.passage.angle;
-      scene.add(pw);
-      if (st.mode === 'metro') {
-        const roof = new THREE.Mesh(
-          keep(new THREE.BoxGeometry(st.passage.hl * 2, 0.35, st.passage.hw * 2)), wallMat,
+    /**
+     * A stairwell going down is a HOLE, and a hole needs sides.
+     *
+     * The ground is cut away over a descending shaft, and there was nothing
+     * behind the cut: standing in the street and looking into a subway
+     * entrance, what you saw past the steps was the sky sphere, because the
+     * sky is drawn everywhere and nothing else was. Two retaining walls the
+     * full depth of the shaft and a riser across its mouth close it.
+     */
+    if (down) {
+      const top = 0.9, bottom = st.level - 2.2;
+      for (const side of [-1, 1]) {
+        const w = new THREE.Mesh(
+          keep(new THREE.BoxGeometry(st.shaft.hl * 2 + 1.6, top - bottom, 0.8)), wallMat,
         );
-        roof.position.set(st.passage.x, st.level + 3.2, st.passage.y);
-        roof.rotation.y = -st.passage.angle;
-        scene.add(roof);
+        const p = atShaft(0, side * (st.shaft.hw + 0.4));
+        w.position.set(p.x, (top + bottom) / 2, p.y);
+        w.rotation.y = -st.shaft.angle;
+        scene.add(w);
+      }
+      const riser = new THREE.Mesh(
+        keep(new THREE.BoxGeometry(1.2, 2.2, st.shaft.hw * 2 + 1.6)), wallMat,
+      );
+      const p = atShaft(-st.shaft.hl - 0.3, 0);
+      riser.position.set(p.x, -1.1, p.y);
+      riser.rotation.y = -st.shaft.angle;
+      scene.add(riser);
+    }
+
+    /**
+     * The passage from the foot of the stairs in to the platform — drawn only
+     * as far as the hall, not all the way to the platform edge.
+     *
+     * The walkable corridor has to reach a point ON a platform, or it stops
+     * over the rails. The DRAWN one must not: carried the same distance it
+     * hung a roof slab and two walls out over the platform, inside the room
+     * they are supposed to be outside of. It is clipped at the wall it comes
+     * through, which is exactly where the doorway is.
+     */
+    {
+      const dx = pEnd.x - pMouth.x, dy = pEnd.y - pMouth.y;
+      let stop = 1;
+      for (let i = 1; i <= 48; i++) {
+        const u = i / 48;
+        if (inRect(st.hall, pMouth.x + dx * u, pMouth.y + dy * u)) { stop = u; break; }
+      }
+      const len = Math.hypot(dx, dy) * stop;
+      const cx = pMouth.x + dx * stop / 2, cy = pMouth.y + dy * stop / 2;
+      if (len > 1) {
+        const pw = new THREE.Mesh(
+          keep(new THREE.BoxGeometry(len, 0.4, st.passage.hw * 2)), floorMat,
+        );
+        pw.position.set(cx, st.level - 0.2, cy);
+        pw.rotation.y = -st.passage.angle;
+        scene.add(pw);
+        if (st.mode === 'metro') {
+          const roof = new THREE.Mesh(
+            keep(new THREE.BoxGeometry(len, 0.35, st.passage.hw * 2)), wallMat,
+          );
+          roof.position.set(cx, st.level + 3.2, cy);
+          roof.rotation.y = -st.passage.angle;
+          scene.add(roof);
+          // Sides, for the same reason the shaft has them: without, the
+          // corridor is a floating slab with the sky either side of it.
+          for (const side of [-1, 1]) {
+            const w = new THREE.Mesh(
+              keep(new THREE.BoxGeometry(len, 3.6, 0.4)), wallMat,
+            );
+            w.position.set(
+              cx + Math.sin(-st.passage.angle) * side * st.passage.hw,
+              st.level + 1.6,
+              cy + Math.cos(-st.passage.angle) * side * st.passage.hw,
+            );
+            w.rotation.y = -st.passage.angle;
+            scene.add(w);
+          }
+        }
       }
     }
 

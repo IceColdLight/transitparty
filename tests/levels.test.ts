@@ -86,12 +86,19 @@ check('the mouth of the stairs is out on the street where it can be found',
 {
   const walker = newBody(mouth.x, mouth.y);
   const dir = { x: Math.cos(st.shaft.angle), y: Math.sin(st.shaft.angle) };
-  let lowest = 0;
+  let lowest = 0;   // eslint-disable-line prefer-const
   // Just far enough to reach the bottom. Walking on for another forty metres
   // takes you off the end of the platform and out of the station entirely,
   // which is a fine thing for a player to do and a poor way to write a test.
-  for (let i = 0; i < 60 * 3.5; i++) {
-    stepBody(walker, { wx: dir.x, wy: dir.y, sprint: false, jump: false }, STEP, ground(i * STEP));
+  /**
+   * In only as far as the foot of the stairs. Walking on lands you on a
+   * platform with a live service on it, and a metro that scoops you up is a
+   * perfectly good thing to happen to a player and a poor way to write a test
+   * about a staircase.
+   */
+  let clock = 0;
+  for (let i = 0; i < 60 * 3.5 && lowest > st.level + 0.3; i++, clock += STEP) {
+    stepBody(walker, { wx: dir.x, wy: dir.y, sprint: false, jump: false }, STEP, ground(clock));
     lowest = Math.min(lowest, walker.h);
   }
   note(`walked in and reached ${lowest.toFixed(1)}m, platform is at ${st.level.toFixed(1)}m`);
@@ -100,8 +107,8 @@ check('the mouth of the stairs is out on the street where it can be found',
 
   // …and back up again, or the metro is a trap.
   let highest = walker.h;
-  for (let i = 0; i < 60 * 8; i++) {
-    stepBody(walker, { wx: -dir.x, wy: -dir.y, sprint: false, jump: false }, STEP, ground(i * STEP));
+  for (let i = 0; i < 60 * 8; i++, clock += STEP) {
+    stepBody(walker, { wx: -dir.x, wy: -dir.y, sprint: false, jump: false }, STEP, ground(clock));
     highest = Math.max(highest, walker.h);
   }
   check('and you can climb back out again',

@@ -158,7 +158,7 @@ if (rider) shoot('fp-riding', rider.x, rider.y, 0.5, rider.angle);
       y: st.shaft.y - Math.sin(st.shaft.angle) * st.shaft.hl,
     };
     shoot('stairs-down', mouth.x - Math.cos(st.shaft.angle) * 9,
-      mouth.y - Math.sin(st.shaft.angle) * 9, 0, st.shaft.angle, -0.25);
+      mouth.y - Math.sin(st.shaft.angle) * 9, PLAYER.eye, st.shaft.angle, -0.35);
     shoot('platform-under', st.hall.x - Math.cos(st.hall.angle) * (st.hall.hl - 6),
       st.hall.y - Math.sin(st.hall.angle) * (st.hall.hl - 6), st.level, st.hall.angle);
   }

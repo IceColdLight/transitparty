@@ -11,7 +11,7 @@
  * open it up. It is to make sure there is something there, and to fence the
  * few places where there cannot be.
  */
-import { inRect } from './stations.js';
+import { rectsOverlap, type Rect } from './stations.js';
 import type { City } from './types.js';
 
 export type Footprint = { x: number; y: number; w: number; d: number; h: number; tone: number };
@@ -40,6 +40,29 @@ export function viaductLegs(city: City) {
 }
 
 /**
+ * The strip of ground a viaduct leg needs, as a rectangle.
+ *
+ * The ends are pushed out by the clearance as well, so that where two legs
+ * meet at an angle the outside of the bend is covered — square ends leave a
+ * wedge at every corner, and a wedge at a corner is a building with a railway
+ * through it.
+ */
+export function viaductStrips(city: City): Rect[] {
+  const out: Rect[] = [];
+  for (const s of viaductLegs(city)) {
+    const dx = s.bx - s.ax, dy = s.by - s.ay;
+    const len = Math.hypot(dx, dy);
+    if (len < 1) continue;
+    out.push({
+      x: (s.ax + s.bx) / 2, y: (s.ay + s.by) / 2,
+      angle: Math.atan2(dy, dx),
+      hl: len / 2 + VIADUCT_CLEARANCE, hw: VIADUCT_CLEARANCE,
+    });
+  }
+  return out;
+}
+
+/**
  * Is this plot in the way of something at street level?
  *
  * ONLY the viaduct and the elevated stations. A metro is in a tunnel and a
@@ -47,17 +70,13 @@ export function viaductLegs(city: City) {
  * over from when rail ran on the road, left long strips of visible land nobody
  * could walk on.
  */
-export function blockedBySurfaceRail(city: City, x: number, y: number, r: number): boolean {
-  for (const s of viaductLegs(city)) {
-    const dx = s.bx - s.ax, dy = s.by - s.ay;
-    const len2 = dx * dx + dy * dy || 1;
-    const u = Math.max(0, Math.min(1, ((x - s.ax) * dx + (y - s.ay) * dy) / len2));
-    const px = s.ax + dx * u, py = s.ay + dy * u;
-    if (Math.hypot(x - px, y - py) < VIADUCT_CLEARANCE + r) return true;
-  }
+export function blockedBySurfaceRail(city: City, plot: Rect): boolean {
+  for (const strip of viaductStrips(city)) if (rectsOverlap(plot, strip)) return true;
   for (const st of city.stations) {
     if (st.level <= 0) continue;   // underground takes up no ground
-    if (inRect(st.hall, x, y, r) || inRect(st.passage, x, y, r)) return true;
+    if (rectsOverlap(plot, st.hall) || rectsOverlap(plot, st.passage)) return true;
+    // A flight of stairs UP stands on the pavement; one going down does not.
+    if (rectsOverlap(plot, st.shaft)) return true;
   }
   return false;
 }
@@ -78,7 +97,9 @@ export function footprintsOf(city: City): Footprint[] {
         const w = cw - inset * 2, d = ch - inset * 2;
         if (w < 6 || d < 6) continue;
         const px = gx + inset + w / 2, py = gy + inset + d / 2;
-        if (blockedBySurfaceRail(city, px, py, Math.min(w, d) / 2)) continue;
+        // The whole footprint, not a circle inside it: a viaduct clearing the
+        // middle of a plot by a metre still goes through both its corners.
+        if (blockedBySurfaceRail(city, { x: px, y: py, angle: 0, hl: w / 2, hw: d / 2 })) continue;
         out.push({ x: px, y: py, w, d, h: 11 + n * 34 + hash2(gy, gx) * 12, tone: n });
       }
     }

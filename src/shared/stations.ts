@@ -23,6 +23,7 @@
  */
 import { PLAYER } from './constants.js';
 import type { City } from './types.js';
+import type { Pt } from './river.js';
 
 export type Station = {
   stop: number;
@@ -45,6 +46,33 @@ export type Station = {
   deck: number;
 };
 
+/**
+ * Which way the line runs THROUGH a stop: the bisector of the leg arriving and
+ * the leg leaving.
+ *
+ * Not either leg on its own, and that matters. The hall used to take the leg
+ * arriving while the vehicle standing in it took the leg leaving, so at any
+ * bend the platform and the train pointed different ways — by the whole turn,
+ * not half of it — and one in eight trains stood with its nose outside its own
+ * station. The bisector is the one axis both can agree on, and it splits
+ * whatever bend is left evenly between the two directions of travel.
+ */
+export function alignmentAt(prev: Pt | null, here: Pt, next: Pt | null): number {
+  const unit = (a: Pt, b: Pt) => {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len = Math.hypot(dx, dy) || 1;
+    return { x: dx / len, y: dy / len };
+  };
+  const into = prev ? unit(prev, here) : null;
+  const outOf = next ? unit(here, next) : null;
+  if (!into) return Math.atan2(outOf!.y, outOf!.x);
+  if (!outOf) return Math.atan2(into.y, into.x);
+  const mx = into.x + outOf.x, my = into.y + outOf.y;
+  // A perfect reversal has no bisector; fall back to the leg being left on.
+  if (Math.hypot(mx, my) < 1e-6) return Math.atan2(outOf.y, outOf.x);
+  return Math.atan2(my, mx);
+}
+
 /** An oriented rectangle: centre, heading, and half-extents along and across. */
 export type Rect = { x: number; y: number; angle: number; hl: number; hw: number };
 
@@ -52,6 +80,26 @@ export function inRect(r: Rect, x: number, y: number, grow = 0): boolean {
   const dx = x - r.x, dy = y - r.y;
   const c = Math.cos(-r.angle), s = Math.sin(-r.angle);
   return Math.abs(dx * c - dy * s) <= r.hl + grow && Math.abs(dx * s + dy * c) <= r.hw + grow;
+}
+
+/**
+ * Do two oriented rectangles overlap? Four separating axes and no more, which
+ * is all a pair of rectangles can offer.
+ *
+ * This exists because everything in the city that has to keep out of the way
+ * of everything else is a rectangle — a building, a station hall, a corridor,
+ * the strip of land a viaduct needs — and the alternative, testing a CIRCLE
+ * around each one, is wrong in the direction that shows: it under-covers the
+ * corners, which is exactly where a viaduct ends up inside a building.
+ */
+export function rectsOverlap(a: Rect, b: Rect, grow = 0): boolean {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  for (const th of [a.angle, a.angle + Math.PI / 2, b.angle, b.angle + Math.PI / 2]) {
+    const ra = Math.abs(Math.cos(a.angle - th)) * a.hl + Math.abs(Math.sin(a.angle - th)) * a.hw;
+    const rb = Math.abs(Math.cos(b.angle - th)) * b.hl + Math.abs(Math.sin(b.angle - th)) * b.hw;
+    if (Math.abs(dx * Math.cos(th) + dy * Math.sin(th)) > ra + rb + grow) return false;
+  }
+  return true;
 }
 
 /** How far across a rectangle a point lies, from its centre line. */

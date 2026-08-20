@@ -20,7 +20,15 @@ const elapsed = Date.now() - t0;
 describe(`the generator — ${N} cities`);
 
 note(`${elapsed}ms for ${N} cities (${(elapsed / N).toFixed(1)}ms each)`);
-check('a city is cheap enough to build on demand', elapsed / N < 40,
+/**
+ * A budget, not a benchmark. A city is built once when the seed changes, so
+ * anything under a frame or two is free — what this is really watching for is
+ * a criterion that has quietly become unsatisfiable, which shows up as the
+ * generator grinding through attempt after attempt. Demanding straight track
+ * through every rail station moved it from about 22ms to about 40ms, which is
+ * the cost of throwing away roughly one corridor in three.
+ */
+check('a city is cheap enough to build on demand', elapsed / N < 70,
   `${(elapsed / N).toFixed(1)}ms each, budget 40ms`);
 
 const strict = cities.filter((c) => c.par.strict).length;

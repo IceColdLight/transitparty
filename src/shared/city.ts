@@ -39,7 +39,7 @@ import {
   type Block, type Streets, bridgeSites, makeBlocks, makeStreets, nearestJunction,
   onStreet, snapToStreet, streetRoute,
 } from './streets.js';
-import type { Station } from './stations.js';
+import { alignmentAt, type Station } from './stations.js';
 import type { City, Line, Stop } from './types.js';
 
 type Pt = { x: number; y: number };
@@ -57,6 +57,7 @@ const TAILS = [
 ];
 
 const dist = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y);
+
 
 function clampPt(p: Pt): Pt {
   const m = CITY.margin * 0.5;
@@ -90,43 +91,67 @@ function corridor(r: Rng, a: Pt, b: Pt, bend: number): Pt[] {
   return out;
 }
 
-function polyLength(poly: Pt[]): number {
-  let L = 0;
-  for (let i = 1; i < poly.length; i++) L += dist(poly[i - 1], poly[i]);
-  return L;
-}
-
-/** Point at a given distance along a polyline. */
-function alongPoly(poly: Pt[], d: number): Pt {
-  if (d <= 0) return poly[0];
-  let acc = 0;
-  for (let i = 1; i < poly.length; i++) {
-    const seg = dist(poly[i - 1], poly[i]);
-    if (acc + seg >= d) {
-      const u = seg < 1e-9 ? 0 : (d - acc) / seg;
-      return {
-        x: poly[i - 1].x + (poly[i].x - poly[i - 1].x) * u,
-        y: poly[i - 1].y + (poly[i].y - poly[i - 1].y) * u,
-      };
-    }
-    acc += seg;
+/** Every point at which a corridor meets a street, in order along it. */
+function crossingsAlong(s: Streets, poly: Pt[]): { t: number; p: Pt }[] {
+  const out: { t: number; p: Pt }[] = [];
+  let base = 0;
+  for (let i = 0; i + 1 < poly.length; i++) {
+    const a = poly[i], b = poly[i + 1];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    const hit = (u: number) => {
+      if (!(u > 0 && u < 1)) return;
+      out.push({ t: base + len * u, p: { x: a.x + dx * u, y: a.y + dy * u } });
+    };
+    if (Math.abs(dx) > 1e-6) for (const x of s.xs) hit((x - a.x) / dx);
+    if (Math.abs(dy) > 1e-6) for (const y of s.ys) hit((y - a.y) / dy);
+    base += len;
   }
-  return poly[poly.length - 1];
+  return out.sort((p, q) => p.t - q.t);
 }
 
 /**
- * Stops along a corridor at roughly `spacing` metres. The jitter matters more
- * than it looks: evenly spaced stops read as a diagram, and the whole point of
- * the world view is that it is not one.
+ * Rail stops go where the corridor already CROSSES a street.
+ *
+ * Sampling the corridor at even intervals and then snapping each sample to
+ * the nearest street was the obvious way and it is what made every station
+ * fight its own rails. The snap keeps one coordinate and moves the other, so
+ * a corridor running diagonally has each stop pulled sideways by up to half a
+ * block — and alternately, whichever axis happened to be nearer, so the line
+ * came out as a zigzag. Two fifths of rail stops turned by more than twenty
+ * degrees and one in sixteen by more than ninety: a metro that doubled back
+ * on itself between stations. The hall is square to the line and the train
+ * arrives along it, so at a kink like that neither can be right.
+ *
+ * Choosing FROM the crossings buys the same thing the snap was after — a
+ * station you can walk to — without moving anything off the alignment. What
+ * is left of the turn at a stop is the corridor's own curvature, which is a
+ * railway going round a bend rather than a mistake.
  */
-function placeAlong(r: Rng, poly: Pt[], spacing: number): Pt[] {
-  const L = polyLength(poly);
-  const n = Math.max(2, Math.round(L / spacing));
-  const step = L / n;
-  const out: Pt[] = [];
-  for (let i = 0; i <= n; i++) {
-    const j = i === 0 || i === n ? 0 : range(r, -0.24, 0.24) * step;
-    out.push(alongPoly(poly, i * step + j));
+function placeAtCrossings(r: Rng, s: Streets, poly: Pt[], spacing: number): Pt[] {
+  const xs = crossingsAlong(s, poly);
+  if (xs.length < 3) return [];
+  /**
+   * The spacing is a TARGET divided into the corridor, not a fixed stride.
+   * Taken literally it leaves a remainder — and on a short corridor the
+   * remainder is the difference between three stops and two, which is the
+   * difference between a line and nothing. More than half of all rejected
+   * corridors were failing here before the length was divided out.
+   */
+  const span = xs[xs.length - 1].t;
+  const step = span / Math.max(2, Math.round(span / spacing));
+  const out: Pt[] = [xs[0].p];
+  let last = xs[0].t;
+  for (;;) {
+    const want = last + step * range(r, 0.86, 1.14);
+    let best = -1;
+    for (let j = 0; j < xs.length; j++) {
+      if (xs[j].t < last + step * 0.5) continue;
+      if (best < 0 || Math.abs(xs[j].t - want) < Math.abs(xs[best].t - want)) best = j;
+    }
+    if (best < 0) break;
+    out.push(xs[best].p);
+    last = xs[best].t;
   }
   return out;
 }
@@ -273,7 +298,7 @@ export function generateNet(seed: number): {
   });
   const mainBank = bankOf(river, centre);
   const hubPt = onBank(mainBank) ?? centre;
-  const hub = addStop(hubPt);
+  let hub = addStop(hubPt);
   usedNames.delete(stops[hub].name);
   stops[hub].name = 'Hauptbahnhof';
   usedNames.add('Hauptbahnhof');
@@ -344,11 +369,84 @@ export function generateNet(seed: number): {
     // it drives through is nobody's business.
     const onRoad = mode === 'bus' || mode === 'tram';
     const spacing = spec.spacing * range(r, 0.88, 1.12);
-    const pts = onRoad ? placeOnPath(r, poly, spacing) : placeAlong(r, poly, spacing);
+    const pts = onRoad
+      ? placeOnPath(r, poly, spacing)
+      : placeAtCrossings(r, streets, poly, spacing);
+    if (pts.length < 3) return null;
+    let viaAt = -1;
     if (via) {
       let best = 0;
       for (let i = 1; i < pts.length; i++) if (dist(pts[i], via) < dist(pts[best], via)) best = i;
       pts[best] = via;
+      viaAt = best;
+    }
+
+    /**
+     * A railway may not turn sharply AT a station.
+     *
+     * The hall is a box square to the line with a train standing inside it; at
+     * a bend the platform follows one leg and the train the other, and the
+     * rails come up through the wall in between. It is not a drawing problem —
+     * the two requirements contradict each other — so the alignment is fixed
+     * instead. Two fifths of rail stops used to turn by more than twenty
+     * degrees and one in sixteen by more than ninety, which is a metro that
+     * doubles back on itself between stations.
+     *
+     * A kink is usually ONE stop out of line, so the first answer is to drop
+     * that stop and let the line run straight past it, which is what a railway
+     * does. Only when the offender is the bridge, or there is nothing left to
+     * drop, is the whole corridor thrown away.
+     *
+     * It happens HERE, before any stop exists, and that is not incidental:
+     * pruning after the stops were created left them behind with no line
+     * calling at them, which is the orphan leak `addLine` already rewinds for.
+     * What it needs is where each point will END UP — snapped to its street
+     * and merged with any neighbour — because those two moves are what bend
+     * the line in the first place.
+     */
+    if (!onRoad) {
+      const settled = pts.map((raw) => {
+        const p = onStreet(streets, raw) ? raw : snapToStreet(streets, raw);
+        for (const st of stops) if (dist(st, p) <= CITY.mergeRadius) return { x: st.x, y: st.y };
+        return p;
+      });
+      const lim = (RAIL.maxTurn * Math.PI) / 180;
+      for (;;) {
+        let worst = -1, worstT = lim;
+        for (let i = 1; i + 1 < settled.length; i++) {
+          const a = settled[i - 1], b = settled[i], c = settled[i + 1];
+          const t = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(b.y - a.y, b.x - a.x);
+          const turn = Math.abs(Math.atan2(Math.sin(t), Math.cos(t)));
+          if (turn > worstT) { worst = i; worstT = turn; }
+        }
+        if (worst < 0) break;
+        if (settled.length <= 3) return null;
+        /**
+         * The bridge and the hub are the two stops a line exists to serve, so
+         * they are never the one dropped. When the kink is AT one of them the
+         * approach is straightened instead, by dropping whichever neighbour
+         * leaves the smaller turn — and only if neither does is the corridor
+         * given up on. Rejecting outright left the Hauptbahnhof with no line
+         * calling at it in about one city in sixty.
+         */
+        let cut = worst;
+        if (worst === viaAt) {
+          const turnWithout = (drop: number) => {
+            const t = settled.filter((_, k) => k !== drop);
+            const i = drop < viaAt ? viaAt - 1 : viaAt;
+            if (i < 1 || i + 1 >= t.length) return Infinity;
+            const a = t[i - 1], b = t[i], c = t[i + 1];
+            const d = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(b.y - a.y, b.x - a.x);
+            return Math.abs(Math.atan2(Math.sin(d), Math.cos(d)));
+          };
+          const before = turnWithout(worst - 1), after = turnWithout(worst + 1);
+          if (Math.min(before, after) > lim) return null;
+          cut = before <= after ? worst - 1 : worst + 1;
+        }
+        settled.splice(cut, 1);
+        pts.splice(cut, 1);
+        if (viaAt > cut) viaAt--;
+      }
     }
 
     /**
@@ -407,6 +505,20 @@ export function generateNet(seed: number): {
       }
     }
 
+    /**
+     * A railway may not turn sharply AT a station.
+     *
+     * The hall is a box square to the line and the train stands inside it; at
+     * a bend the platform follows one leg and the train the other, and the
+     * rails come up through the wall in between. It is not a drawing problem,
+     * the two requirements contradict each other — so the corridor is thrown
+     * away and redrawn, exactly like a line that misses its speed band.
+     *
+     * The worst offenders were not gentle curves. They were crossing lines
+     * whose two bank anchors both landed near the same bridge, so the line ran
+     * out to the water and doubled straight back: turns of a hundred and sixty
+     * degrees at the station on the bridge.
+     */
     /**
      * And the same argument about the water. `crosses()` vets the CORRIDOR,
      * but a line's real geometry is its stop list — and stops move after the
@@ -471,6 +583,16 @@ export function generateNet(seed: number): {
     for (let k = 0; k < 20; k++) {
       const a = onBank(1), b = onBank(-1);
       if (!a || !b) continue;
+      /**
+       * The two anchors have to be on opposite sides of the bridge, not merely
+       * on opposite banks. Both landing near the same crossing gives a line
+       * that runs out to the water and doubles straight back — a hairpin with
+       * a station at its point, which is the sharpest turn in the city and the
+       * one the platform can least afford.
+       */
+      const swing = Math.atan2(a.y - bridge.y, a.x - bridge.x)
+        - Math.atan2(b.y - bridge.y, b.x - bridge.x);
+      if (Math.abs(Math.atan2(Math.sin(swing), Math.cos(swing))) < 2.1) continue;
       let poly: Pt[] | null;
       if (onRoad) {
         // A tram crosses on the bridge deck, like everything else on wheels.
@@ -528,6 +650,40 @@ export function generateNet(seed: number): {
   fill('metro', FLEET.metro - 1, 140, 2);
   fill('tram', FLEET.tram - 1, 230, 1, 1700);
   fill('bus', FLEET.bus, 300, 0, 1100);
+
+  /**
+   * A stop nothing calls at is not a station.
+   *
+   * `addLine` rewinds the stops a rejected corridor created, which covers the
+   * common case, but not the Hauptbahnhof: it is created up front so its name
+   * can be reserved and so the trunk lines have something to be pinned to, and
+   * if every line that was going to serve it gets thrown away it is left
+   * standing on its own — a labelled interchange, on the map and on the
+   * street, with no service. Rarely, and it is exactly the sort of thing that
+   * is invisible until somebody walks to it.
+   *
+   * Ids are indices, so dropping one means remapping every line that follows
+   * it. The name goes to the busiest interchange left, because that is what
+   * the name means.
+   */
+  {
+    const kept = stops.filter((s) => s.lines.length > 0);
+    if (kept.length !== stops.length) {
+      const remap = new Map<number, number>();
+      kept.forEach((s, i) => { remap.set(s.id, i); s.id = i; });
+      for (const l of lines) l.stops = l.stops.map((i) => remap.get(i)!);
+      stops.length = 0;
+      stops.push(...kept);
+      const moved = remap.get(hub);
+      if (moved === undefined) {
+        hub = 0;
+        for (const s of stops) if (s.lines.length > stops[hub].lines.length) hub = s.id;
+        stops[hub].name = 'Hauptbahnhof';
+      } else {
+        hub = moved;
+      }
+    }
+  }
 
   assignLanes(stops, lines);
   return {
@@ -703,8 +859,21 @@ function assignLanes(stops: Stop[], lines: Line[]) {
        * minority, so they simply forgo the separation rather than drive into
        * the buildings to get it.
        */
+      /**
+       * And no stand on RAIL at all.
+       *
+       * A stand is a place further along the kerb, which is exactly what a
+       * train cannot use: its station is a box centred on the stop with a
+       * platform beside it, so a stand of any size parks the train outside its
+       * own hall. At a four-line interchange the metro was standing
+       * twenty-eight metres away, off the street entirely and over open
+       * ground. Rail already has all the separation it needs — a tunnel of its
+       * own, and a lane inside it.
+       */
       const turning = !!a && !!b && (a.x * b.x + a.y * b.y) < Math.cos(0.35);
-      const slotAlong = turning ? 0 : (stand.get(`${line.id}:${line.stops[i]}`) ?? 0);
+      const slotAlong = rail || turning
+        ? 0
+        : (stand.get(`${line.id}:${line.stops[i]}`) ?? 0);
       const bay = slotAlong * LANES.berth;
 
       const n = !a || !b
@@ -738,25 +907,54 @@ function buildStations(streets: Streets, stops: Stop[], lines: Line[]): Station[
     for (const mode of ['metro', 'train'] as const) {
       const here = lines.filter((l) => l.mode === mode && l.stops.includes(s.id));
       if (!here.length) continue;
-      const line = here[0];
-
-      // Along the line, taken from the leg it runs on through this stop.
-      const i = line.stops.indexOf(s.id);
-      const other = stops[line.stops[i > 0 ? i - 1 : i + 1]];
-      const angle = Math.atan2(other.y - s.y, other.x - s.x);
 
       /**
-       * Wide enough for its own tracks plus somewhere to stand beside them.
-       * The hall used to be a fixed width centred on the stop while the track
-       * ran off to one side in its lane, so the rails came up through the
-       * platform.
+       * Along the line THROUGH this stop — the bisector, which is the one axis
+       * the platform and the train standing at it can both agree on. Averaged
+       * over every line of the mode that calls here, as an AXIS rather than a
+       * direction, because two lines meeting at a station are a station, not
+       * two stations, and half of them run the other way.
        */
-      let widest = 0;
+      let ax = 0, ay = 0;
+      const axis = (l: Line) => {
+        const k = l.stops.indexOf(s.id);
+        return alignmentAt(
+          k > 0 ? stops[l.stops[k - 1]] : null,
+          s,
+          k + 1 < l.stops.length ? stops[l.stops[k + 1]] : null,
+        );
+      };
+      for (const l of here) { const a = axis(l); ax += Math.cos(2 * a); ay += Math.sin(2 * a); }
+      const angle = Math.atan2(ay, ax) / 2;
+
+      /**
+       * Big enough to hold every train that stops here, wherever it stands.
+       *
+       * A fixed width centred on the stop brought the rails up through the
+       * platform, because the track lies at the LINE's lane offset. Measuring
+       * one line's body fixed that and left the next one out in the cold: two
+       * metro lines meeting at a station are square to each other's platform
+       * only if the box is sized from both. The corners of the actual bodies,
+       * in the hall's own frame, answer all of it at once.
+       */
+      let reachAlong = BODIES[mode].l / 2, reachAcross = BODIES[mode].w / 2;
+      const hc = Math.cos(-angle), hs = Math.sin(-angle);
       for (const l of here) {
         const k = l.stops.indexOf(s.id);
-        if (k >= 0) widest = Math.max(widest, Math.hypot(l.lane[k].x, l.lane[k].y));
+        if (k < 0) continue;
+        const a = axis(l);
+        const c = Math.cos(a), sn = Math.sin(a);
+        for (const dir of [1, -1] as const) {
+          const ox = l.lane[k].x * dir, oy = l.lane[k].y * dir;
+          for (const u of [-1, 1]) for (const v of [-1, 1]) {
+            const px = ox + c * u * BODIES[mode].l / 2 - sn * v * BODIES[mode].w / 2;
+            const py = oy + sn * u * BODIES[mode].l / 2 + c * v * BODIES[mode].w / 2;
+            reachAlong = Math.max(reachAlong, Math.abs(px * hc - py * hs));
+            reachAcross = Math.max(reachAcross, Math.abs(px * hs + py * hc));
+          }
+        }
       }
-      const trackHalf = widest + BODIES[mode].w / 2;
+      const trackHalf = reachAcross;
       const hw = trackHalf + STATION.platform;
 
       /**
@@ -794,7 +992,7 @@ function buildStations(streets: Streets, stops: Stop[], lines: Line[]): Station[
         level: LEVELS[mode] + BODIES[mode].deck,
         hall: {
           x: s.x, y: s.y, angle,
-          hl: (BODIES[mode].l + STATION.overhang) / 2,
+          hl: reachAlong + STATION.overhang / 2,
           hw,
         },
         trackHalf,

@@ -329,7 +329,24 @@ export type ModeId = 'train' | 'metro' | 'tram' | 'bus';
  * to keep opposing trains apart — and everything has to fit inside the station
  * box with room for a platform beside it.
  */
-export const RAIL = { gauge: 2.7, spread: 3.4 };
+export const RAIL = {
+  gauge: 2.7,
+  spread: 3.4,
+  /**
+   * The sharpest turn a railway may make AT A STATION, in degrees.
+   *
+   * A station is a box square to the line with a train standing in it, and at
+   * a bend those two things point in different directions — the platform along
+   * one leg, the train along the other, the rails through the wall between
+   * them. No amount of drawing fixes it; the geometry is simply contradictory.
+   *
+   * So the line is redrawn instead. The measured cost of demanding this is in
+   * `tests/levels.test.ts`: it is nearly free, because a corridor that bends
+   * hard at a stop is usually a corridor that went out to a bridge and came
+   * straight back, which was a bad railway for other reasons too.
+   */
+  maxTurn: 30,
+};
 
 /**
  * What height each mode runs at. The metro is in a tunnel and the train is on

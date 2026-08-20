@@ -371,7 +371,23 @@ export function stepBody(p: Body, input: MoveInput, dt: number, g: Ground): void
    */
   const ground = pickFloor(floorsAt(g, p.x, p.y), Math.max(wasAt, p.h), reach);
   const deckHeight = deck ? deck.height : null;
-  const floor = deckHeight !== null && (ground === null || deckHeight > ground)
+  /**
+   * Inside the vehicle you are riding, its floor is your floor — whatever the
+   * ground under it happens to be doing.
+   *
+   * The same argument as "you stay on what you are already standing on", one
+   * level up. A metro's deck and the platform it calls at are the same height
+   * by construction, so anything that passes a hair above the deck outranks it
+   * — and a stairwell ramp is a CONTINUOUS floor from the street down to the
+   * platform, so somewhere along it there is always a point a few centimetres
+   * higher. A train running under one plucked a standing passenger out of the
+   * carriage and left them on the stairs.
+   *
+   * Getting off still works: you leave through a doorway, which takes you out
+   * of the floor plan, and then there is no deck to prefer.
+   */
+  const aboard = deck !== null && deck.vehicle.id === p.riding;
+  const floor = deckHeight !== null && (aboard || ground === null || deckHeight > ground)
     ? deckHeight
     : (ground ?? 0);
   const landing = deckHeight !== null && floor === deckHeight ? deck!.vehicle.id : null;

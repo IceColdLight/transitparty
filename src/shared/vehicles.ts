@@ -19,6 +19,7 @@
  * terminus is the one place you can reliably catch something you just missed.
  */
 import { BODIES, DOORS, LEVELS, PLAYER, TEMPO, type ModeId } from './constants.js';
+import { alignmentAt } from './stations.js';
 import type { City, Line, Vehicle } from './types.js';
 
 /** Seconds into this vehicle's cycle. */
@@ -119,10 +120,22 @@ function locate(city: City, line: Line, run: number, time: number): Vehicle {
       const stand = line.dwell - q + (i === n - 1 ? line.dwell : 0);
       const left = line.dwell - q;
       const nextIdx = i < n - 1 ? i + 1 : n - 2;
-      const base = at(i), nx = at(nextIdx);
+      const base = at(i);
       const b = berths[i];
       const p = { x: base.x + b.x, y: base.y + b.y };
       const legTime = i < n - 1 ? legs[i] : legs[n - 2];
+      /**
+       * Standing, it lies along the bisector — the same axis the platform was
+       * built on. Facing down the leg it is about to leave on looks right
+       * until the line bends at the stop, and then the train is askew inside
+       * its own station by the whole angle of the turn.
+       */
+      const centre = (k: number) => city.stops[order[k]];
+      const stood = alignmentAt(
+        i > 0 ? centre(i - 1) : null,
+        centre(i),
+        i + 1 < n ? centre(i + 1) : null,
+      );
       /**
        * The doors, as a function of the clock like everything else here.
        *
@@ -136,7 +149,7 @@ function locate(city: City, line: Line, run: number, time: number): Vehicle {
         q / DOORS.travel,
         Math.max(0, left - DOORS.settle) / DOORS.travel,
       );
-      return mk(p.x, p.y, Math.atan2(nx.y - base.y, nx.x - base.x), order[i], order[nextIdx],
+      return mk(p.x, p.y, stood, order[i], order[nextIdx],
         stand + legTime, doorLeft(mode, left), door);
     }
     q -= line.dwell;
