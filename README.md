@@ -1,11 +1,19 @@
 # Transit Party
 
-A racing prototype: **everyone starts at the same stop, everyone is trying to
-reach the same other stop, and the only way to get there is public transport.**
-The city is generated fresh every round, so nobody has memorised it.
+A first-person racing prototype: **everyone starts at the same stop, everyone
+is trying to reach the same other stop, and the only way to get there is public
+transport.** The city is generated fresh every round, so nobody has memorised
+it.
 
-It is a Wikirace where the links are tram lines. You get a network map and a
-live view of every vehicle on it; what you do with that is the whole game.
+It is a Wikirace where the links are tram lines — except you are standing in
+the street. There is no board button: a bus is a moving platform and you ride
+it by walking onto it, which means you can also jump off one at speed, and
+being carried two stops past your change is a thing that happens to you rather
+than a message on a screen.
+
+You cannot see the network from down there. You get a folded map you hold up in
+front of your face, and while you are reading it you cannot see where you are
+going.
 
 Playable solo. Meant to be better with three.
 
@@ -69,21 +77,40 @@ interpolation buffer.
 
 ## How to play
 
+Click the window to take the mouse.
+
 | Key | |
 | --- | --- |
-| `WASD` | walk |
+| `mouse` | look |
+| `WASD` | walk, relative to where you are looking |
 | `SHIFT` | run — a few seconds' worth, then you need a rest |
-| `E` | board / get off |
-| `TAB` | **hold** for the network map |
+| `SPACE` | jump |
+| `TAB` | **hold** to take out your map |
 | `R` | unstick yourself |
+| `ESC` | give the mouse back |
 
-You start on a platform. Somewhere across the city is a stop with a gold ring
-around it. First one standing in that ring wins.
+You start on a platform. Somewhere across the city is a **column of gold light**
+you can see over the rooftops — that is where you are going. First one to stand
+under it wins. The green column behind you is where everyone started.
 
-**Hold TAB and plan.** The map shows the whole network and every vehicle on it,
-live, with a legend down the left telling you what each line is, how fast it
-actually travels and how often it comes. It does not show you where you are
-walking, so holding it costs you.
+**There is no board button.** A vehicle is a surface. Walk onto its deck and
+you go where it goes; step off and you do not. At a stop it pulls up in the
+middle of the road and you walk out to it — which one you get on is decided by
+which one you walk onto.
+
+**Buses and trams are open-topped, metros and trains are not.** That is not
+decoration: you can step off a bus whenever you like, and a metro keeps hold of
+you until the next station. Look at the vehicle and you know which it is.
+
+**Jumping off a moving one throws you down the street.** You keep its speed,
+minus a bit of drag, so stepping off a tram at full pelt carries you fifteen
+metres and lands you somewhere you did not walk to. Walk to the edge first —
+jumping on the spot in the middle of the deck just puts you back on it.
+
+**Hold TAB and read the map.** It shows the whole network and every vehicle on
+it, live, with a legend telling you what each line is, how fast it actually
+travels and how often it comes. It is a physical card you hold up, so while you
+are reading it you are running blind.
 
 **The map lies about distance.** It is a diagram, not a map: the centre is
 enlarged and the outskirts are squashed, exactly like every transit map you
@@ -111,9 +138,14 @@ and you go round them, so the distance to a stop is rarely the distance to a
 stop. Holding a diagonal walks you round a corner without touching the
 keyboard again.
 
-**The street view does not show you the network.** Down at street level you get
-what you would actually get: roads, buildings, water, and a station sign with
-the lines that call at it. Where those lines *go* is on the map.
+**The street shows you nothing about the network.** You get what you would
+actually get standing in a city: roads, buildings, water, and a station sign
+with the lines that call at it. Where those lines *go* is a question for the
+map, and the fog means you can see to the end of the street and no further.
+
+**Watch out for traffic.** Anything standing over a deck is lifted onto it, so
+a bus coming through a junction while you are crossing will pick you up and
+take you with it. Sometimes that is a free ride.
 
 ---
 
@@ -158,8 +190,8 @@ perfect passenger, and is **at least twice as fast by transit as on foot**. Most
 randomly generated pairs of stops fail at least one of those, so most of them
 are thrown away.
 
-A round ends when everybody has finished or three and a half minutes have
-passed. Then there are eleven seconds of results and a brand new city.
+A round ends when everybody has finished or five minutes have passed. Then
+there are eleven seconds of results and a brand new city.
 
 The HUD shows `par` — what a planner reckons the trip takes assuming you turn
 up at each stop not knowing when the next vehicle leaves. You have the live
@@ -170,7 +202,7 @@ in 33 races out of 40.
 
 ## How it is built
 
-TypeScript, no framework, canvas 2D. The interesting part is what is *not*
+TypeScript, three.js, no framework. The interesting part is what is *not*
 there.
 
 **The city is never sent over the wire.** It is a pure function of one integer.
@@ -185,6 +217,12 @@ them, exactly, for free. Riding one is just holding its id. This is also why
 they draw perfectly smoothly at any framerate: the client is evaluating a
 function, not replaying samples.
 
+**And riding is not a state.** There is no `board` message and no boarding
+rule. A vehicle is a moving platform, and `riding` is simply whatever surface
+your feet are on this tick — which means missing your stop, being carried past
+it, jumping off early and getting scooped up by a passing bus all fall out of
+one mechanic instead of needing four.
+
 So the state packet is a handful of players and a seed, no matter how big the
 city gets.
 
@@ -198,15 +236,16 @@ src/shared/     imported by the server, the client AND the tests
   routing.ts      a route planner, used to vet generated cities
   vehicles.ts     the timetable as a pure function of (city, time)
   schematic.ts    the map's distortion, and why it has one
-  movement.ts     walking, and what buildings and the river do to it
+  movement.ts     the player as a body: walking, jumping, and standing on
+                  things that move
   types.ts
 src/server/     authoritative: owns where players are, and nothing else
-src/client/     main loop, the street view, the schematic overlay
-tools/shots.ts  renders both views to PNG with no browser
-tests/          seven suites, zero dependencies
+src/client/     main loop and camera, the three.js city, the map you hold
+tools/shots.ts  renders the first-person view to PNG with no browser at all
+tests/          nine suites, zero dependencies
 ```
 
-`npm test` runs all seven. They check design properties, not code paths — that
+`npm test` runs all nine. They check design properties, not code paths — that
 every generated race needs two changes, that riding always beats walking, that
 every bus leg runs along a street and no station is stranded inside a block,
 that the map lies about distance but never tangles a line with itself, and that

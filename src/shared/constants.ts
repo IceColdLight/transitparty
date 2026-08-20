@@ -141,8 +141,79 @@ const sprintDuty = STAMINA.burst / (STAMINA.burst + STAMINA.recover);
 export const SUSTAINED_WALK =
   WALK.speed * (1 - sprintDuty) + WALK.speed * WALK.sprint * sprintDuty;
 
-/** You can board a vehicle from this far off its stop — the width of a platform. */
-export const BOARD_RADIUS = 17;
+/**
+ * The player as a physical object. First person, so these are real metres:
+ * the eye height is what you see the city from and the step is what lets you
+ * walk onto a bus without thinking about it.
+ */
+export const PLAYER = {
+  eye: 1.62,
+  radius: 0.36,
+  /**
+   * How high a lip you can walk up without jumping. Every vehicle deck is
+   * below this on purpose — boarding at a stop should be walking on, not a
+   * platforming challenge. Jumping OFF is where the skill lives.
+   */
+  step: 0.75,
+  /** m/s upward. Clears about 1.2m, which is a railing and not a building. */
+  jump: 7.4,
+  gravity: 22,
+  /** how hard you can steer in mid-air, m/s per second */
+  airAccel: 10,
+  /**
+   * How fast borrowed momentum bleeds off once your feet leave the deck.
+   * A jump hangs for 2*jump/gravity, so at 0.55 you keep about 70% of a
+   * tram's speed through the arc — which is the difference between hopping
+   * off and being fired off.
+   */
+  airDrag: 0.55,
+};
+
+/**
+ * How far the platform sits from the middle of the road.
+ *
+ * This exists because of a bug that would otherwise have no fix. A stop and
+ * the vehicle calling at it are the same point, and anything standing over a
+ * deck is lifted onto it — so a player waiting at a stop would be scooped up
+ * by whatever arrived first, and the choice of what to board would be made
+ * for them. Standing them five metres to one side puts three metres of road
+ * between the platform and the widest vehicle in the city, and boarding
+ * becomes what it should be: you walk out and get on THAT one.
+ */
+export const PLATFORM = {
+  offset: 5,
+  /**
+   * Barely a kerb. The platform is drawn but not simulated — walking is flat,
+   * on the street plane — so anything you could actually trip over is a step
+   * the player walks straight through. Keep it low enough not to notice.
+   */
+  height: 0.06,
+  length: 16,
+  width: 4,
+};
+
+/**
+ * Vehicle bodies in metres — length, width, height — and the height of the
+ * floor you stand on.
+ *
+ * The decks are all under PLAYER.step, so you board by walking on during the
+ * dwell. The widths are a little over life size: a 2.55m bus is a miserable
+ * thing to land on at speed, and the extra half metre is the difference
+ * between a stunt that works and one that works sometimes.
+ */
+export const BODIES: Record<ModeId, { l: number; w: number; h: number; deck: number }> = {
+  train: { l: 46, w: 4.0, h: 4.0, deck: 0.7 },
+  metro: { l: 34, w: 3.6, h: 3.6, deck: 0.6 },
+  tram: { l: 22, w: 3.2, h: 3.4, deck: 0.5 },
+  bus: { l: 13, w: 3.0, h: 3.2, deck: 0.5 },
+};
+
+/*
+ * BOARD_RADIUS is gone. It said how close you had to be to a stop to press
+ * the board key, and there is no board key: a vehicle is a surface and you get
+ * on it by standing on it. The distance that matters now is the width of the
+ * road between the platform and the deck — PLATFORM.offset.
+ */
 /** Standing this close to the destination, on foot, wins the round. */
 export const ARRIVE_RADIUS = 22;
 
@@ -253,8 +324,16 @@ export const FLEET = {
 };
 
 export const RACE = {
-  /** Hard stop on a round, in case somebody wanders off. */
-  roundSeconds: 630 / TEMPO,
+  /**
+   * Hard stop on a round, in case somebody wanders off.
+   *
+   * Generous, and more so since the game went first person. `par` is a
+   * planner's number: it costs the ride and the wait and says nothing about
+   * finding the platform, misjudging a gap, or being carried two stops past
+   * your change because you were looking the wrong way. Ending a round on the
+   * clock is a failure of the timer, not of the player.
+   */
+  roundSeconds: 900 / TEMPO,
   /**
    * Results on screen between rounds. Absolute seconds, like `dwell` — reading
    * a scoreboard is a human task and does not get faster because the trams do.

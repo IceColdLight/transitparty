@@ -17,7 +17,7 @@
  * planner has to use the same one the player's legs do — otherwise `par` is
  * quoting a journey nobody can make.
  */
-import { CITY } from './constants.js';
+import { CITY, PLATFORM } from './constants.js';
 import { type Rng, range } from './rng.js';
 import { type River, illegalCrossing } from './river.js';
 
@@ -249,4 +249,33 @@ export function walkDistances(g: WalkGraph, from: number, limit = Infinity): Flo
     }
   }
   return dist;
+}
+
+/**
+ * Where you wait for a vehicle: beside the road, not in it. Which side is
+ * arbitrary but must be stable, so it comes from the stop's own id.
+ */
+export function platformAt(s: Streets, p: Pt, id: number): Pt {
+  const h = s.width / 2;
+  const onVertical = s.xs.some((x) => Math.abs(p.x - x) <= h);
+  const onHorizontal = s.ys.some((y) => Math.abs(p.y - y) <= h);
+  const bits = Math.imul(id, 2654435761) >>> 0;
+  const side = bits % 2 === 0 ? 1 : -1;
+  const other = (bits >> 1) % 2 === 0 ? 1 : -1;
+
+  /**
+   * At a CROSSROADS the platform has to come off both centre lines, not one.
+   *
+   * Stepping five metres sideways off a north-south street leaves you standing
+   * squarely in the middle of the east-west one, and everything driving down
+   * it goes straight over you. Interchanges are crossroads and origins are
+   * interchanges, so this hit the start of a round: players spawned in traffic
+   * and were carried off before the clock started.
+   */
+  if (onVertical && onHorizontal) {
+    return { x: p.x + side * PLATFORM.offset, y: p.y + other * PLATFORM.offset };
+  }
+  return onVertical
+    ? { x: p.x + side * PLATFORM.offset, y: p.y }
+    : { x: p.x, y: p.y + side * PLATFORM.offset };
 }

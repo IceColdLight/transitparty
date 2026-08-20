@@ -10,7 +10,7 @@
  */
 import { MODES, STAMINA, SUSTAINED_WALK, WALK } from '../src/shared/constants.js';
 import { buildCity } from '../src/shared/city.js';
-import { newWalker, stepWalk } from '../src/shared/movement.js';
+import { newBody, stepBody } from '../src/shared/movement.js';
 import type { River } from '../src/shared/river.js';
 import type { Streets } from '../src/shared/streets.js';
 import { check, describe, near, note, report } from './harness.js';
@@ -18,16 +18,17 @@ import { check, describe, near, note, report } from './harness.js';
 /** An empty plain, to measure the speed model without a building in the way. */
 const OPEN: Streets = { xs: [0], ys: [0], width: 1e7 };
 const NO_RIVER: River = { poly: [{ x: -1e6, y: -1e6 }, { x: -1e6, y: 1e6 }], bridges: [] };
+const OPEN_GROUND = { streets: OPEN, river: NO_RIVER, transit: null };
 const STEP = 1 / 60;
 
 /** Walk east for `seconds`, deciding each tick whether to hold the sprint key. */
 function run(seconds: number, wantSprint: (t: number, stamina: number) => boolean) {
-  const w = newWalker(0, 0);
+  const w = newBody(0, 0);
   let sprintTicks = 0, bursts = 0, wasSprinting = false, lowest = 1;
   const burstLengths: number[] = [];
   let current = 0;
   for (let t = 0; t < seconds; t += STEP) {
-    stepWalk(w, 1, 0, STEP, OPEN, NO_RIVER, wantSprint(t, w.stamina));
+    stepBody(w, { wx: 1, wy: 0, sprint: wantSprint(t, w.stamina), jump: false }, STEP, OPEN_GROUND);
     lowest = Math.min(lowest, w.stamina);
     if (w.sprinting) {
       sprintTicks++;
@@ -83,11 +84,11 @@ check('and the sprint cuts out on its own when it hits the bottom',
   !emptied.w.sprinting, 'still running: no');
 
 // Now stop and let it come back.
-const recovering = newWalker(0, 0);
+const recovering = newBody(0, 0);
 recovering.stamina = 0;
 let toFull = 0;
 for (; toFull < 40; toFull += STEP) {
-  stepWalk(recovering, 1, 0, STEP, OPEN, NO_RIVER, false);
+  stepBody(recovering, { wx: 1, wy: 0, sprint: false, jump: false }, STEP, OPEN_GROUND);
   if (recovering.stamina >= 1) break;
 }
 near('refilling takes as long as it says', toFull, STAMINA.recover, 0.2);
@@ -137,10 +138,11 @@ describe('it does not let you cheat the city');
 
 const city = buildCity(4242);
 const origin = city.stops[city.origin];
-const runner = newWalker(origin.x, origin.y);
+const runner = newBody(origin.x, origin.y);
 for (let i = 0; i < 60 * 40; i++) {
   const t = i / 60;
-  stepWalk(runner, Math.cos(t * 0.7), Math.sin(t * 0.7), STEP, city.streets, city.river, true);
+  stepBody(runner, { wx: Math.cos(t * 0.7), wy: Math.sin(t * 0.7), sprint: true, jump: false },
+    STEP, { streets: city.streets, river: city.river, transit: null });
 }
 const { onStreet } = await import('../src/shared/streets.js');
 check('you cannot sprint into a building', onStreet(city.streets, runner),

@@ -14,7 +14,7 @@
  */
 import { WALK } from '../src/shared/constants.js';
 import { buildCity } from '../src/shared/city.js';
-import { newWalker, stepWalk } from '../src/shared/movement.js';
+import { newBody, stepBody } from '../src/shared/movement.js';
 import { onStreet } from '../src/shared/streets.js';
 import { pedestrian, walkNeighbours } from '../src/shared/routing.js';
 import { walkDistances } from '../src/shared/streets.js';
@@ -84,11 +84,12 @@ for (const c of cities.slice(0, 12)) {
   const start = c.stops.reduce((best, s) =>
     Math.hypot(s.x - target.x, s.y - target.y) < Math.hypot(best.x - target.x, best.y - target.y)
       ? s : best);
-  const w = newWalker(start.x, start.y);
+  const w = newBody(start.x, start.y);
+  const ground = { streets: c.streets, river: c.river, transit: null };
   for (let i = 0; i < 30 * 30; i++) {
     const dx = target.x - w.x, dy = target.y - w.y;
     const len = Math.hypot(dx, dy) || 1;
-    stepWalk(w, dx / len, dy / len, 1 / 30, c.streets, c.river);
+    stepBody(w, { wx: dx / len, wy: dy / len, sprint: false, jump: false }, 1 / 30, ground);
   }
   if (!onStreet(c.streets, w)) walkedIn++;
 }
@@ -98,8 +99,11 @@ check('you cannot walk into a building, however hard you try at it',
 /** And the grid is not a cage: a diagonal should carry you round a corner. */
 const c0 = cities[0];
 const from = c0.stops[c0.origin];
-const w = newWalker(from.x, from.y);
-for (let i = 0; i < 30 * 12; i++) stepWalk(w, 0.707, 0.707, 1 / 30, c0.streets, c0.river);
+const w = newBody(from.x, from.y);
+const g0 = { streets: c0.streets, river: c0.river, transit: null };
+for (let i = 0; i < 30 * 12; i++) {
+  stepBody(w, { wx: 0.707, wy: 0.707, sprint: false, jump: false }, 1 / 30, g0);
+}
 const travelled = Math.hypot(w.x - from.x, w.y - from.y);
 check('holding a diagonal walks you around blocks rather than into them',
   travelled > WALK.speed * 12 * 0.35,

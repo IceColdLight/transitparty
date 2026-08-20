@@ -11,11 +11,12 @@
  */
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
-  ARRIVE_RADIUS, BOARD_RADIUS, BROADCAST_HZ, PALETTE, RACE, STAMINA, TICK_HZ, WS_PORT,
+  ARRIVE_RADIUS, BROADCAST_HZ, PALETTE, RACE, STAMINA, TICK_HZ, WS_PORT,
 } from '../shared/constants.js';
 import { buildCity } from '../shared/city.js';
-import { newWalker, stepWalk, type Walker } from '../shared/movement.js';
-import { allVehicles, vehicleById } from '../shared/vehicles.js';
+import { type Body, newBody, stepBody } from '../shared/movement.js';
+import { allVehicles } from '../shared/vehicles.js';
+import { platformAt } from '../shared/streets.js';
 import type { C2SMessage, City, PlayerState, S2CMessage, WorldState } from '../shared/types.js';
 
 type Client = {
@@ -25,6 +26,7 @@ type Client = {
   wy: number;
   facing: number;
   sprint: boolean;
+  jump: boolean;
 };
 
 const clients = new Map<string, Client>();
@@ -35,7 +37,7 @@ const players = new Map<string, PlayerState>();
  * to decide how much of it you have. A copy of the latter is published each
  * tick so the bar has something to draw and a rival's dash is readable.
  */
-const walkers = new Map<string, Walker>();
+const bodies = new Map<string, Body>();
 
 let city: City = buildCity(newSeed());
 let roundIndex = 1;
@@ -50,18 +52,36 @@ function newSeed(): number {
 }
 
 function spawn(p: PlayerState) {
-  const s = city.stops[city.origin];
-  // Scatter them a little so a full lobby is not one token deep.
+  // On the PLATFORM, not in the road — see PLATFORM.offset. Standing where
+  // the vehicles stop would mean being scooped up by the first thing to
+  // arrive, which is the choice the round is supposed to open with.
+  const stop = city.stops[city.origin];
+  const pad = platformAt(city.streets, stop, city.origin);
+  // Scatter ALONG the platform, never across it. A radial scatter reached far
+  // enough to put somebody in the middle of the road, where the first vehicle
+  // through picks them up before the round has started.
+  /**
+   * A ring a metre wide, and no wider.
+   *
+   * Every attempt to spread people out along the platform eventually put
+   * somebody back on a centre line — a radial scatter reached into the road,
+   * and scattering "along the platform" is meaningless at a crossroads, where
+   * the platform steps diagonally off both streets at once. Players do not
+   * collide with each other, so standing on top of one another for the first
+   * second of a round costs nothing at all, and being run over before the
+   * clock starts costs the round.
+   */
   const a = Math.random() * Math.PI * 2;
-  const d = Math.random() * 9;
-  p.x = s.x + Math.cos(a) * d;
-  p.y = s.y + Math.sin(a) * d;
+  p.x = pad.x + Math.cos(a) * 1.2;
+  p.y = pad.y + Math.sin(a) * 1.2;
+  p.h = 0;
+  p.grounded = true;
   p.riding = null;
   p.finished = null;
   p.place = 0;
   p.stamina = 1;
   p.sprinting = false;
-  walkers.set(p.id, newWalker(p.x, p.y));
+  bodies.set(p.id, newBody(p.x, p.y));
 }
 
 function startRound() {
@@ -86,35 +106,6 @@ function endRound() {
   for (const p of players.values()) p.riding = null;
 }
 
-function interact(p: PlayerState) {
-  if (phase !== 'racing' || p.finished !== null) return;
-
-  if (p.riding) {
-    const v = vehicleById(city, p.riding, time);
-    // You cannot step off a moving tram. The doors are the whole timing game:
-    // miss your stop and you are carried to the next one, which is a real
-    // punishment and takes no rule of its own to express.
-    if (v && v.atStop >= 0) {
-      const s = city.stops[v.atStop];
-      const a = Math.random() * Math.PI * 2;
-      p.x = s.x + Math.cos(a) * 7;
-      p.y = s.y + Math.sin(a) * 7;
-      p.riding = null;
-      walkers.set(p.id, newWalker(p.x, p.y));
-    }
-    return;
-  }
-
-  let best: string | null = null;
-  let bestD = BOARD_RADIUS;
-  for (const v of allVehicles(city, time)) {
-    if (v.atStop < 0) continue;
-    const d = Math.hypot(v.x - p.x, v.y - p.y);
-    if (d <= bestD) { bestD = d; best = v.id; }
-  }
-  if (best) p.riding = best;
-}
-
 function tick(dt: number) {
   time += dt;
   elapsed += dt;
@@ -125,39 +116,37 @@ function tick(dt: number) {
   }
 
   const dest = city.stops[city.destination];
+  // One evaluation of the timetable for the whole tick: every body needs the
+  // same fleet, and it is a pure function of the clock anyway.
+  const vehicles = allVehicles(city, time);
+  const ground = { streets: city.streets, river: city.river, transit: { city, vehicles, time } };
+
   for (const p of players.values()) {
     if (p.finished !== null) continue;
 
-    if (p.riding) {
-      const v = vehicleById(city, p.riding, time);
-      if (!v) { p.riding = null; continue; }
-      p.x = v.x;
-      p.y = v.y;
-      // Sitting down is resting: you get your legs back on the way, which is
-      // what makes spending the whole tank on the first dash affordable.
-      const w = walkers.get(p.id);
-      if (w) {
-        w.sprinting = false;
-        w.stamina = Math.min(1, w.stamina + dt / STAMINA.recover);
-        p.stamina = w.stamina;
-        p.sprinting = false;
-      }
-      continue;
-    }
-
     const c = clients.get(p.id);
-    let walker = walkers.get(p.id);
-    if (!walker) { walker = newWalker(p.x, p.y); walkers.set(p.id, walker); }
-    walker.x = p.x; walker.y = p.y;
-    stepWalk(walker, c?.wx ?? 0, c?.wy ?? 0, dt, city.streets, city.river, c?.sprint ?? false);
-    p.x = walker.x; p.y = walker.y;
-    p.stamina = walker.stamina;
-    p.sprinting = walker.sprinting;
+    let body = bodies.get(p.id);
+    if (!body) { body = newBody(p.x, p.y); bodies.set(p.id, body); }
+
+    stepBody(body, {
+      wx: c?.wx ?? 0, wy: c?.wy ?? 0,
+      sprint: c?.sprint ?? false, jump: c?.jump ?? false,
+    }, dt, ground);
+
+    p.x = body.x; p.y = body.y; p.h = body.h;
+    p.grounded = body.grounded;
+    p.riding = body.riding;
+    p.sprinting = body.sprinting;
+    // Sitting down is resting: you get your legs back on the way, which is
+    // what makes spending the whole tank on the first dash affordable.
+    if (body.riding) body.stamina = Math.min(1, body.stamina + dt / STAMINA.recover);
+    p.stamina = body.stamina;
     if (c) p.facing = c.facing;
 
-    // You finish on your feet. The last leg of every race is a walk from the
-    // platform to the door, which is where a close one is actually decided.
-    if (Math.hypot(p.x - dest.x, p.y - dest.y) <= ARRIVE_RADIUS) {
+    // You finish on your feet. The last leg of every race is the walk from
+    // the platform to the door, which is where a close one is decided — and
+    // being carried past it by a tram does not count.
+    if (!p.riding && Math.hypot(p.x - dest.x, p.y - dest.y) <= ARRIVE_RADIUS) {
       p.finished = elapsed;
       p.place = ++finishers;
       console.log(`  ${p.name} finished ${p.place}. in ${elapsed.toFixed(1)}s`);
@@ -192,11 +181,11 @@ wss.on('connection', (socket) => {
   const color = PALETTE[(nextId - 2) % PALETTE.length];
   const player: PlayerState = {
     id, name: `Player ${nextId - 1}`, color,
-    x: 0, y: 0, facing: 0, riding: null, stamina: 1, sprinting: false,
-    finished: null, place: 0,
+    x: 0, y: 0, h: 0, facing: 0, grounded: true, riding: null,
+    stamina: 1, sprinting: false, finished: null, place: 0,
   };
   players.set(id, player);
-  clients.set(id, { id, socket, wx: 0, wy: 0, facing: 0, sprint: false });
+  clients.set(id, { id, socket, wx: 0, wy: 0, facing: 0, sprint: false, jump: false });
   spawn(player);
 
   const send = (m: S2CMessage) => socket.send(JSON.stringify(m));
@@ -214,9 +203,9 @@ wss.on('connection', (socket) => {
       c.wy = len > 1 ? msg.wy / len : msg.wy;
       c.facing = msg.facing;
       c.sprint = !!msg.sprint;
+      c.jump = !!msg.jump;
     } else if (msg.type === 'action') {
-      if (msg.action === 'interact') interact(player);
-      else if (msg.action === 'reset') spawn(player);
+      if (msg.action === 'reset') spawn(player);
     } else if (msg.type === 'name') {
       player.name = String(msg.name).slice(0, 16) || player.name;
     }
@@ -225,7 +214,7 @@ wss.on('connection', (socket) => {
   socket.on('close', () => {
     clients.delete(id);
     players.delete(id);
-    walkers.delete(id);
+    bodies.delete(id);
     console.log(`- ${id} (${players.size} playing)`);
   });
 });

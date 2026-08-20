@@ -9,7 +9,7 @@
  */
 import { CITY, WALK } from '../src/shared/constants.js';
 import { buildCity } from '../src/shared/city.js';
-import { newWalker, stepWalk } from '../src/shared/movement.js';
+import { newBody, stepBody } from '../src/shared/movement.js';
 import { bankOf, illegalCrossing, nearestOnRiver } from '../src/shared/river.js';
 import { bridgeSites, onStreet } from '../src/shared/streets.js';
 import { walkNeighbours } from '../src/shared/routing.js';
@@ -53,13 +53,14 @@ if (quays.length) {
   const len = Math.hypot(q.x - near.x, q.y - near.y) || 1;
   // Along the road, straight at the water.
   const dir = { x: -(q.y - near.y) / len, y: (q.x - near.x) / len };
-  const w = newWalker(q.x - dir.x * 130, q.y - dir.y * 130);
+  const w = newBody(q.x - dir.x * 130, q.y - dir.y * 130);
   const startBank = bankOf(river, w);
   check('the test walker starts on a street', onStreet(city.streets, w),
     `${w.x.toFixed(0)},${w.y.toFixed(0)}`);
 
   const from = { x: w.x, y: w.y };
-  for (let i = 0; i < 30 * 60; i++) stepWalk(w, dir.x, dir.y, 1 / 30, city.streets, river);
+  const ground = { streets: city.streets, river, transit: null };
+  for (let i = 0; i < 30 * 60; i++) stepBody(w, { wx: dir.x, wy: dir.y, sprint: false, jump: false }, 1 / 30, ground);
   check('you cannot walk across the river where there is no bridge',
     bankOf(river, w) === startBank,
     `walked ${Math.hypot(w.x - from.x, w.y - from.y).toFixed(0)}m up the road and stopped at the water`);
@@ -72,10 +73,11 @@ for (const b of river.bridges) {
   const near = nearestOnRiver(river, { x: b.x + 1, y: b.y });
   const len = Math.hypot(b.x - near.x, b.y - near.y) || 1;
   const dir = { x: -(b.y - near.y) / len, y: (b.x - near.x) / len };
-  const w = newWalker(b.x - dir.x * 90, b.y - dir.y * 90);
+  const w = newBody(b.x - dir.x * 90, b.y - dir.y * 90);
   const startBank = bankOf(river, w);
+  const ground = { streets: city.streets, river, transit: null };
   for (let i = 0; i < 30 * 120; i++) {
-    stepWalk(w, dir.x, dir.y, 1 / 30, city.streets, river);
+    stepBody(w, { wx: dir.x, wy: dir.y, sprint: false, jump: false }, 1 / 30, ground);
     if (bankOf(river, w) !== startBank) break;
   }
   if (bankOf(river, w) !== startBank) bridged++;

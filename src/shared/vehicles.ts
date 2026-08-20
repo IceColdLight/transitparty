@@ -18,7 +18,7 @@
  * therefore get a double dwell, which is the turnaround, and which is why a
  * terminus is the one place you can reliably catch something you just missed.
  */
-import { TEMPO } from './constants.js';
+import { BODIES, TEMPO } from './constants.js';
 import type { City, Line, Vehicle } from './types.js';
 
 /** Seconds into this vehicle's cycle. */
@@ -135,4 +135,59 @@ export function departures(city: City, stopId: number, time: number, horizon = 6
     }
   }
   return out.sort((a, b) => a.in - b.in);
+}
+
+/**
+ * Is this point inside the vehicle's floor plan? A rotated rectangle test —
+ * cheap, and the only shape a vehicle needs to be for standing on.
+ */
+export function overVehicle(city: City, v: Vehicle, x: number, y: number, slack = 0): boolean {
+  const b = BODIES[city.lines[v.line].mode];
+  const dx = x - v.x, dy = y - v.y;
+  const c = Math.cos(-v.angle), s = Math.sin(-v.angle);
+  const lx = dx * c - dy * s, ly = dx * s + dy * c;
+  return Math.abs(lx) <= b.l / 2 + slack && Math.abs(ly) <= b.w / 2 + slack;
+}
+
+/**
+ * The floor under a pair of feet: the highest vehicle deck they are standing
+ * over, or null for the street. `reach` stops you being snapped up onto the
+ * roof of something you are walking past at ground level.
+ */
+export function deckUnder(
+  city: City, vehicles: Vehicle[], x: number, y: number, feet: number, reach: number,
+  standingOn: string | null = null,
+): { vehicle: Vehicle; height: number } | null {
+  let best: { vehicle: Vehicle; height: number } | null = null;
+  for (const v of vehicles) {
+    if (!overVehicle(city, v, x, y)) continue;
+    const height = BODIES[city.lines[v.line].mode].deck;
+    if (height > feet + reach) continue;
+    /**
+     * You stay on what you are already standing on.
+     *
+     * Vehicles do not avoid each other, so at a stop where two lines call it
+     * is common for a second one to be occupying the same patch of road. Left
+     * to pick the highest deck, this would hand the player from the bus they
+     * chose to whichever tram happened to be sharing the stop — and then the
+     * bus would drive away without them. It cost a third of all integration
+     * runs before anyone noticed what it was.
+     */
+    if (v.id === standingOn) return { vehicle: v, height };
+    if (!best || height > best.height) best = { vehicle: v, height };
+  }
+  return best;
+}
+
+/**
+ * How fast a vehicle is travelling right now, by sampling the timetable either
+ * side of the moment. There is no velocity to read: position is a function of
+ * the clock, so its derivative is too.
+ */
+export function vehicleVelocity(city: City, id: string, time: number, dt = 1 / 60):
+{ x: number; y: number } {
+  const a = vehicleById(city, id, time - dt);
+  const b = vehicleById(city, id, time);
+  if (!a || !b) return { x: 0, y: 0 };
+  return { x: (b.x - a.x) / dt, y: (b.y - a.y) / dt };
 }

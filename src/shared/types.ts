@@ -121,9 +121,17 @@ export type PlayerState = {
   color: string;
   x: number;
   y: number;
-  /** world radians, for the little nose on the token */
+  /** height of the feet above the street — 0 on the ground, a deck aboard */
+  h: number;
+  /** world radians: which way they are looking */
   facing: number;
-  /** id of the vehicle they are aboard, or null if on foot */
+  /** feet on something solid, as opposed to mid-jump */
+  grounded: boolean;
+  /**
+   * The vehicle under their feet, or null. Nobody boards anything: this is
+   * whatever surface they happen to be standing on, so it appears the moment
+   * they step onto a deck and vanishes the moment they step off.
+   */
   riding: string | null;
   /** 0..1 sprint stamina. Everyone's is visible, so a rival's dash is readable */
   stamina: number;
@@ -162,9 +170,14 @@ export type C2SWalk = {
   facing: number;
   /** holding the sprint key */
   sprint: boolean;
+  /** holding the jump key */
+  jump: boolean;
 };
-/** One key does board, alight, and nothing else. */
-export type C2SAction = { type: 'action'; action: 'interact' | 'reset' };
+/**
+ * There is no board key any more — you get on things by walking onto them.
+ * All that is left is unsticking yourself.
+ */
+export type C2SAction = { type: 'action'; action: 'reset' };
 export type C2SName = { type: 'name'; name: string };
 export type C2SMessage = C2SWalk | C2SAction | C2SName;
 

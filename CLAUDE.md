@@ -54,6 +54,118 @@ Corollaries, all of which were violated and cost real rework:
 
 ---
 
+## It is first person now, and the earlier argument against that was wrong
+
+The prototype was top-down for three iterations and the case for keeping it
+there was written down at the time: the decisions in this game are topological,
+a schematic shows topology and a camera does not, and transit in first person
+is mostly standing on a platform watching something approach — the part of the
+loop with no verb in it.
+
+Every one of those claims was true and the conclusion was still wrong, because
+it assumed **boarding stays a button**. Once getting on and off is something
+you physically do, the empty part of the loop is where the verbs are, and two
+things fall out that the top-down version had to fake:
+
+- **The information split is free.** In the street you cannot see the network,
+  so the map has to be consulted and remembered rather than glanced at. The
+  top-down view drew every line on the ground, which made the diagram on TAB
+  decoration — you could plan a whole route without ever opening it.
+- **Missing a connection becomes a thing that happens to you** rather than a
+  number going up. Being carried two stops past your change because you were
+  looking the wrong way is the same event as before and a completely different
+  experience.
+
+The lesson worth keeping is not "3D good". It is that an argument about a
+design can be perfectly sound and still rest on an assumption nobody stated —
+here, that the verb set was fixed.
+
+---
+
+## Riding is a surface, not a state
+
+There is no board key, no boarding rule and no `riding` transition anywhere. A
+vehicle is a moving platform; `riding` is whatever your feet are on this tick.
+
+That one decision pays for itself several times over. Missing your stop, being
+carried past it, jumping off early, stepping onto the wrong line, being scooped
+up by a bus while crossing a junction — all of them are the same mechanic
+observed at different moments, rather than four rules that have to agree with
+each other.
+
+The fiddly part, and the source of most of the port's bugs, is that horizontal
+velocity is stored **relative to whatever you are standing on**. On the street
+that is the world; on a tram doing thirty metres a second it is the tram.
+Converting between the two at the moment your feet leave or land is exactly
+what makes stepping off throw you down the street instead of dropping you where
+you stood — and getting the conversion wrong is silent in both directions.
+
+Three rules sit on top of it:
+
+- **A deck is below `PLAYER.step`**, so boarding at a stop is walking on rather
+  than a platforming challenge. Jumping OFF is where the skill lives.
+- **Road vehicles are open-topped and rail ones are enclosed.** You may leave a
+  bus whenever you like; a metro keeps hold of you until the next station. The
+  geometry says which is which without a word of UI, and it is also the only
+  thing standing between a player and a jump into the middle of a solid block,
+  which has no sensible answer.
+- **You stay on what you are already standing on.** Vehicles do not avoid each
+  other, so two lines calling at one stop routinely overlap; picking the
+  highest deck instead handed the player from the bus they chose to whichever
+  tram was sharing the road, and then the bus drove off without them.
+
+---
+
+## What the port broke, and how each was caught
+
+Worth keeping as a list, because the pattern in it is the useful part: **almost
+nothing here was caught by a test, and almost everything was obvious in a
+picture or in one careful re-read.**
+
+Found by looking at renders (`npm run shots`):
+
+- every building pure black — an InstancedMesh carries its own `instanceColor`,
+  and asking the shader for a per-vertex colour attribute the geometry does not
+  have paints the lot black
+- the destination beam started at ground level, so the first thing you saw of
+  the city was the inside of its own signpost
+- station signs sat at the centre of the platform, which is where a player
+  waiting for a vehicle stands: a black rectangle across your view and a pole
+  through your head
+- riding looked like nothing. A vehicle was one solid box, and standing on its
+  deck put the camera inside it where backface culling made the whole thing
+  vanish — you travelled at thirty metres a second with no evidence you were
+  on anything
+- bridge decks stood 400mm proud of the road and the platform kerb 180mm, both
+  of which pedestrians walked straight through, because walking is flat
+
+Found by re-reading the code:
+
+- **mid-air steering was scaled by walking speed as well as by the air
+  acceleration**, giving about 72 m/s² of control — full authority, which
+  quietly cancelled the momentum the jump exists for. No test caught it because
+  every test jumped without holding a direction
+- **falling onto a deck fell through it.** The search for a floor only looked
+  at where the feet ENDED the tick, so on the one tick that mattered the deck
+  was rejected for being above them. Hidden because every test boarded from the
+  ground, where the step-up allowance covers it
+- a `process.env` debug switch left in the scene would have thrown on load in a
+  browser
+
+Found by the integration suite, and only because it runs against live traffic:
+
+- **riders did not inherit the vehicle's ROTATION**, only its position, so the
+  deck turned under them and they were thrown into the road at the first
+  corner. A bus route is nothing but corners
+- **you could jump out of a moving metro.** The enclosure blocked horizontal
+  movement and the jump key clears `riding` unconditionally
+- at a crossroads the platform stepped five metres off one street and landed
+  squarely on the centre line of the other, so players spawned in traffic and
+  were carried off before the clock started. Origins are interchanges and
+  interchanges are crossroads, so this hit the START of a round
+
+---
+
 ## Time is compressed, distance is not
 
 `TEMPO` in constants.ts is 3. Every speed is multiplied by it and every
@@ -173,17 +285,27 @@ the average race gained most of a change, from 2.25 to 2.9.
 
 ---
 
-## The street view does not draw the network
+## The street shows you nothing about the network
 
-It used to lay every line out on the ground in full colour, which made the map
-on TAB redundant — you could plan a whole route from the street without ever
-opening the diagram, so the diagram was decoration and the game had one view
-instead of two.
+What the street gives you is what a street gives you: roads, buildings, water,
+and a station sign with the lines that call there. You need that last part —
+standing at a stop you have to know what you can board — but it says nothing
+about where any of them GO.
 
-What the street gives you now is what a street gives you: roads, buildings,
-water, and a station sign with a row of pips for the lines that call there. You
-need that last part — standing at a stop you have to know what you can board —
-but it says nothing about where any of them GO, which is the map's job.
+Two things enforce it and both are load-bearing rather than atmospheric:
+
+- **Fog.** You can see to the end of the street and no further. It is the
+  reason the network can be hidden at all.
+- **The map is an object.** A folded card you hold up in front of your face on
+  TAB and put away when you let go. It costs you most of your view of the
+  street, which is the right price for knowing where the lines go, and it is
+  the reason knowing the route is worth something.
+
+The one thing exempt from the fog is the **destination beam** — a column of
+light over the target stop, visible from anywhere in the city. Without it a
+first-person city is a maze with no compass and the game stops being about
+routes and becomes about not getting lost, which is a different and worse game.
+It tells you WHERE, never HOW.
 
 ---
 
@@ -311,6 +433,10 @@ consequences of other numbers rather than matters of taste:
 | `TEMPO` | taste, not design — but `dwell` and `intermissionSeconds` must stay in absolute seconds when it changes, and the par window has to widen slightly because of it |
 | `WALK.sprint` 1.7 | sized against `MODES.bus.dwell`: the dash has to land inside the doors and the walk has to miss |
 | `SUSTAINED_WALK` | derived, never typed in — it is what the planner charges for walking, and it must track the sprint |
+| `PLAYER.step` 0.75 | above every vehicle deck, on purpose: boarding is walking on, not platforming |
+| `PLAYER.airAccel` / `airDrag` | how much of a moving deck's speed survives a jump. Raise the first much and the momentum stops mattering; that bug shipped once already |
+| `BODIES.*.deck` | must stay under `PLAYER.step`, or that mode becomes unboardable without a running jump |
+| `PLATFORM.offset` 5 | wider than the widest vehicle's half-width by a clear margin, or waiting at a stop means being scooped up by whatever arrives first |
 | `streets.width` 26 | also the tolerance for "is this leg on a street", so the generator's grid check and the player's collision agree by construction |
 
 `tests/city.test.ts` holds the race criteria; `tests/race.test.ts` rides the
@@ -355,9 +481,19 @@ you saw in the picture.
 
 Written down so they are choices rather than surprises:
 
-- **Nothing collides except the river.** Buildings are scenery; you walk
-  through them. Adding building collision means pathfinding, and the river
-  already provides the one barrier the design needs.
+- **Vehicles do not collide with each other.** Two lines calling at one stop
+  will overlap visibly. The gameplay consequence is handled — you stay on what
+  you are standing on — but the picture is wrong, and fixing it properly means
+  queueing at stops, which means vehicles are no longer a pure function of the
+  clock.
+- **Buildings are not collision volumes.** Walking is confined to the streets,
+  which is a stronger constraint and a much cheaper one, so a building is only
+  ever drawn. The one place it shows is that rail alignments would otherwise
+  drive through office blocks, which the renderer solves by not drawing
+  buildings on them.
+- **Other players are drawn from interpolated state**, not snapped to the
+  vehicle they are riding, so a passenger on a fast train reads a few metres
+  behind it.
 - **A line has no branches.** Out and back along one list of stops. A branch is
   something you can board by mistake — a good mechanic and a bad first
   prototype, because "what is the next stop" stops having one answer.
@@ -410,3 +546,5 @@ In rough order of how much each would buy:
 5. **Round-to-round structure.** Best of five across five cities, scoring by
    margin rather than position.
 6. **A line with a branch**, once "next stop" has a good answer in the HUD.
+7. **Vehicles that queue rather than overlap**, if it can be done without
+   giving up the pure-function timetable.

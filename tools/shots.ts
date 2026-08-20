@@ -1,72 +1,166 @@
 /**
- * Render the game's own views to PNG, without a browser.
+ * Render the game to PNG with no browser: the first-person view through
+ * headless WebGL, and the map you hold up, drawn on its card.
  *
- * `src/client/world.ts` and `src/client/map.ts` only ever touch the standard
- * Canvas2D API, so they will draw into a server-side canvas exactly as they
- * draw into the real one. That makes the UI reviewable from a terminal, which
- * on a machine with no browser is the difference between checking a layout and
- * guessing at it — this tool found five real bugs the first time it was
- * pointed at the map, including a legend sitting under the status panel and a
- * destination badge hidden behind the players standing on it.
+ * This exists because the alternative is guessing. A three-dimensional city
+ * has a hundred ways to look wrong that no test will ever catch — a sign
+ * facing the wrong way, a bus sunk into the road, fog that eats the
+ * destination — and every one of them is obvious in a picture.
  *
  *   npm run shots            a default city
  *   npm run shots -- 4242    a specific seed
  *
  * It is not a test: nothing here asserts. It renders, you look.
  */
-import { createCanvas, GlobalFonts, type SKRSContext2D } from '@napi-rs/canvas';
+import createGL from 'gl';
+import * as THREE from 'three';
+import { createCanvas } from '@napi-rs/canvas';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { PLAYER, PLATFORM } from '../src/shared/constants.js';
 import { buildCity } from '../src/shared/city.js';
+import { platformAt } from '../src/shared/streets.js';
 import { allVehicles } from '../src/shared/vehicles.js';
-import { drawWorld } from '../src/client/world.js';
+import { SIGN_H, SIGN_W, buildScene, paintSign } from '../src/client/scene.js';
 import { drawMap } from '../src/client/map.js';
 import type { PlayerState } from '../src/shared/types.js';
 
-for (const [file, name] of [
-  ['/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 'system-ui'],
-  ['/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 'system-ui'],
-] as const) {
-  try { GlobalFonts.registerFromPath(file, name); } catch { /* fall back to whatever is installed */ }
-}
-
+const W = 1440, H = 860;
 const seed = Number(process.argv[2]) || 452460421;
 const out = new URL('../shots/', import.meta.url).pathname;
 mkdirSync(out, { recursive: true });
 
 const city = buildCity(seed);
-const t = 140;
-const vehicles = allVehicles(city, t);
-const o = city.stops[city.origin];
+const time = 140;
+const vehicles = allVehicles(city, time);
 
-/** Two on the platform and one already moving, so every case gets drawn. */
-const players: PlayerState[] = [
-  { id: 'p1', name: 'You', color: '#ff5c5c', x: o.x + 6, y: o.y + 4, facing: 0, riding: null, stamina: 1, sprinting: false, finished: null, place: 0 },
-  // Ada is legging it, so the speed lines get drawn.
-  { id: 'p2', name: 'Ada', color: '#5cc8ff', x: o.x - 34, y: o.y + 4, facing: 0, riding: null, stamina: 0.6, sprinting: true, finished: null, place: 0 },
+// ── a WebGL context with nothing behind it ───────────────────────────────
+/**
+ * three.js speaks WebGL2 and headless-gl only speaks WebGL1, so the handful
+ * of calls three makes that WebGL1 has no word for are filled in from the
+ * equivalent extensions — instancing, vertex arrays — and the ones this scene
+ * genuinely never uses (3D textures, transform feedback, queries) are stubbed
+ * so the renderer can finish starting up.
+ *
+ * It is a rendering harness, not the game. If a shot ever looks wrong in a way
+ * the browser does not, suspect this before suspecting the scene.
+ */
+const context = createGL(W, H, { preserveDrawingBuffer: true }) as any;
+{
+  const ext = (n: string) => context.getExtension(n);
+  const inst = ext('ANGLE_instanced_arrays');
+  const vao = ext('OES_vertex_array_object');
+  const noop = () => {};
+  const shim: Record<string, unknown> = {
+    texImage3D: noop, texSubImage3D: noop, texStorage2D: noop, texStorage3D: noop,
+    compressedTexImage3D: noop, copyTexSubImage3D: noop,
+    createQuery: () => null, deleteQuery: noop, beginQuery: noop, endQuery: noop,
+    getQueryParameter: () => 0,
+    bindBufferBase: noop, uniformBlockBinding: noop,
+    getUniformBlockIndex: () => 0, getActiveUniformBlockParameter: () => 0,
+    invalidateFramebuffer: noop, drawBuffers: noop, readBuffer: noop,
+    blitFramebuffer: noop, renderbufferStorageMultisample: noop,
+    clearBufferfv: noop, clearBufferiv: noop, clearBufferfi: noop,
+    vertexAttribDivisor: inst ? inst.vertexAttribDivisorANGLE.bind(inst) : noop,
+    drawArraysInstanced: inst ? inst.drawArraysInstancedANGLE.bind(inst) : noop,
+    drawElementsInstanced: inst ? inst.drawElementsInstancedANGLE.bind(inst) : noop,
+    createVertexArray: vao ? vao.createVertexArrayOES.bind(vao) : () => null,
+    bindVertexArray: vao ? vao.bindVertexArrayOES.bind(vao) : noop,
+    deleteVertexArray: vao ? vao.deleteVertexArrayOES.bind(vao) : noop,
+    samplerParameteri: noop, bindSampler: noop, createSampler: () => null,
+  };
+  for (const [k, v] of Object.entries(shim)) if (typeof context[k] !== 'function') context[k] = v;
+  // three asks for GLSL 3.00 shaders when it thinks it has WebGL2; this
+  // context compiles GLSL 1.00, so tell it what it really has.
+  context.getParameter = ((orig) => (p: number) =>
+    p === 0x8B8C ? 'WebGL GLSL ES 1.0' : orig.call(context, p))(context.getParameter);
+}
+const fakeCanvas = {
+  width: W, height: H, style: {},
+  addEventListener() {}, removeEventListener() {},
+  getContext: () => context,
+};
+const renderer = new THREE.WebGLRenderer({
+  canvas: fakeCanvas as unknown as HTMLCanvasElement,
+  context: context as unknown as WebGLRenderingContext,
+  antialias: false,
+});
+renderer.setSize(W, H, false);
+
+/** Station signs, painted on a server-side canvas and handed over as raw pixels. */
+function sign(text: string, sub: string[], color: string): THREE.Texture {
+  const c = createCanvas(SIGN_W, SIGN_H);
+  paintSign(c.getContext('2d') as unknown as CanvasRenderingContext2D, text, sub, color);
+  const img = c.getContext('2d').getImageData(0, 0, SIGN_W, SIGN_H);
+  const tex = new THREE.DataTexture(new Uint8Array(img.data), SIGN_W, SIGN_H, THREE.RGBAFormat);
+  tex.flipY = true;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+const built = buildScene(city, { sign });
+const camera = new THREE.PerspectiveCamera(76, W / H, 0.1, 4200);
+camera.rotation.order = 'YXZ';
+
+const origin = city.stops[city.origin];
+const pad = platformAt(city.streets, origin, city.origin);
+const people: PlayerState[] = [
+  { id: 'p2', name: 'Ada', color: '#5cc8ff', x: pad.x + 4, y: pad.y + 6, h: 0, facing: 1,
+    grounded: true, riding: null, stamina: 0.6, sprinting: true, finished: null, place: 0 },
 ];
-const rider = vehicles.find((v) => v.atStop < 0);
-if (rider) {
-  players.push({ id: 'p3', name: 'Bo', color: '#a4ff5c', x: rider.x, y: rider.y, facing: 0, riding: rider.id, stamina: 0.55, sprinting: false, finished: null, place: 0 });
+built.updateVehicles(city, vehicles);
+built.updatePlayers(people, 'p1');
+
+function shoot(name: string, x: number, y: number, h: number, look: number, pitch = 0) {
+  camera.position.set(x, h + PLAYER.eye, y);
+  camera.rotation.set(pitch, -(look + Math.PI / 2), 0);
+  renderer.render(built.scene, camera);
+
+  const px = new Uint8Array(W * H * 4);
+  context.readPixels(0, 0, W, H, context.RGBA, context.UNSIGNED_BYTE, px);
+  const c = createCanvas(W, H);
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(W, H);
+  // GL reads bottom-up; images are top-down.
+  for (let row = 0; row < H; row++) {
+    const from = (H - 1 - row) * W * 4;
+    img.data.set(px.subarray(from, from + W * 4), row * W * 4);
+  }
+  ctx.putImageData(img, 0, 0);
+  writeFileSync(`${out}${name}.png`, c.toBuffer('image/png'));
+  console.log(`  shots/${name}.png`);
 }
 
-function shot(name: string, w: number, h: number, fn: (ctx: SKRSContext2D) => void) {
-  const canvas = createCanvas(w, h);
-  fn(canvas.getContext('2d'));
-  writeFileSync(`${out}${name}.png`, canvas.toBuffer('image/png'));
-  console.log(`  shots/${name}.png  ${w}x${h}`);
+console.log(`seed ${city.seed}: ${origin.name} → ${city.stops[city.destination].name}, ` +
+  `${city.stops.length} stops, ${vehicles.length} vehicles`);
+
+// Standing on the origin platform, looking along the street.
+const onVertical = city.streets.xs.some((x) => Math.abs(origin.x - x) <= city.streets.width / 2);
+const along = onVertical ? Math.PI / 2 : 0;
+// A few metres along the platform, where a player actually stands.
+const step = onVertical ? { x: 0, y: 6 } : { x: 6, y: 0 };
+shoot('fp-platform', pad.x - step.x, pad.y - step.y, PLATFORM.height, along);
+// Straight down, to see the layout whole.
+shoot('aerial', origin.x + 90, origin.y + 90, 260, along, -1.45);
+shoot('fp-across', pad.x, pad.y, PLATFORM.height, Math.atan2(origin.y - pad.y, origin.x - pad.x));
+shoot('fp-up', pad.x, pad.y, PLATFORM.height, along, 0.5);
+
+// Riding: stand on a moving vehicle and look forward down the line.
+const rider = vehicles.find((v) => v.atStop < 0 && ['bus', 'tram'].includes(city.lines[v.line].mode));
+if (rider) shoot('fp-riding', rider.x, rider.y, 0.5, rider.angle);
+
+// And the map, on its card, exactly as it is pasted onto the held quad.
+{
+  const MW = 1024, MH = 704, PAD = 30;
+  const c = createCanvas(MW, MH);
+  const g = c.getContext('2d') as unknown as CanvasRenderingContext2D;
+  g.fillStyle = '#cfc7b4';
+  g.fillRect(0, 0, MW, MH);
+  g.fillStyle = '#b8b0a0';
+  g.fillRect(MW / 2 - 1, 0, 2, MH);
+  g.save();
+  g.translate(PAD, PAD);
+  drawMap(g, city, { w: MW - PAD * 2, h: MH - PAD * 2 }, vehicles, people, 'p1', 1);
+  g.restore();
+  writeFileSync(`${out}held-map.png`, c.toBuffer('image/png'));
+  console.log('  shots/held-map.png');
 }
-
-const wide = { w: 1440, h: 860 };
-const narrow = { w: 820, h: 620 };
-// The drawing code is typed against the DOM's context; the server-side one is
-// the same API with a different name, and only the type disagrees.
-const as2d = (c: SKRSContext2D) => c as unknown as CanvasRenderingContext2D;
-
-console.log(`seed ${city.seed}: ${o.name} → ${city.stops[city.destination].name}, ` +
-  `${city.stops.length} stops, ${city.lines.length} lines, ${vehicles.length} vehicles`);
-shot('world', wide.w, wide.h, (c) =>
-  drawWorld(as2d(c), city, { x: o.x, y: o.y, scale: 1.6 }, wide, vehicles, players, 'p1', t));
-shot('world-riding', wide.w, wide.h, (c) => rider && drawWorld(
-  as2d(c), city, { x: rider.x, y: rider.y, scale: 0.85 }, wide, vehicles, players, 'p3', t));
-shot('map', wide.w, wide.h, (c) => drawMap(as2d(c), city, wide, vehicles, players, 'p1', 1));
-shot('map-narrow', narrow.w, narrow.h, (c) => drawMap(as2d(c), city, narrow, vehicles, players, 'p1', 1));

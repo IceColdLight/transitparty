@@ -8,6 +8,26 @@
         font-family: system-ui, sans-serif; color: #e7edf3; }
       canvas { display: block; }
 
+      /* first person, so there is a middle of the screen and it matters */
+      #crosshair {
+        position: fixed; left: 50%; top: 50%; width: 5px; height: 5px;
+        margin: -2.5px 0 0 -2.5px; border-radius: 50%;
+        background: rgba(255,255,255,0.75); box-shadow: 0 0 4px rgba(0,0,0,0.9);
+        pointer-events: none; opacity: 0; transition: opacity 150ms linear; z-index: 5;
+      }
+      #lock {
+        position: fixed; inset: 0; z-index: 30; display: flex;
+        align-items: center; justify-content: center; cursor: pointer;
+        background: rgba(6, 9, 13, 0.72); backdrop-filter: blur(3px);
+      }
+      #lock .card { padding: 26px 34px; text-align: center; }
+      #lock h2 { margin: 0 0 6px; font-size: 21px; letter-spacing: 1px; }
+      #lock p { margin: 3px 0; font-size: 13px; color: #9fb0c0; }
+      #lock .keys { margin-top: 14px; font-size: 12px; color: #cfdae4; line-height: 1.9; }
+      #lock b { display: inline-block; min-width: 46px; padding: 1px 7px; margin-right: 8px;
+        border-radius: 4px; background: rgba(255,255,255,0.14);
+        border: 1px solid rgba(255,255,255,0.28); }
+
       /* ── HUD ──────────────────────────────────────────────────────────
          Top centre : the race — where from, where to, and the clock.
          Top left   : what YOU are doing right now.
@@ -150,10 +170,11 @@
       <div class="par" id="par">&nbsp;</div>
     </div>
 
+    <div id="crosshair"></div>
+
     <div id="status" class="panel">
-      <div><span class="k">You</span><span class="v big" id="s-what">walking</span></div>
-      <div><span class="k">Next</span><span class="v" id="s-next">—</span></div>
-      <div><span class="k">To go</span><span class="v" id="s-togo">—</span></div>
+      <div><span class="k">You</span><span class="v big" id="s-what">on foot</span></div>
+      <div><span class="v" id="s-togo">—</span></div>
     </div>
 
     <div id="standings" class="panel"></div>
@@ -171,12 +192,23 @@
     <input id="name" maxlength="16" placeholder="your name" />
 
     <div id="hint" class="panel">
-      <div><b>WASD</b> walk &nbsp; <b>SHIFT</b> run &nbsp; <b>E</b> board / get off</div>
-      <div><b>TAB</b> network map &nbsp; <b>R</b> unstick</div>
+      <div><b>WASD</b> walk &nbsp; <b>SHIFT</b> run &nbsp; <b>SPACE</b> jump</div>
+      <div><b>TAB</b> hold up the map &nbsp; <b>R</b> unstick</div>
       <div id="status-net">connecting…</div>
     </div>
 
-    <div id="maphint">hold <b>TAB</b> for the network map</div>
+    <div id="maphint">hold <b>TAB</b> to take out your map</div>
+
+    <div id="lock"><div class="card panel">
+      <h2>Transit Party</h2>
+      <p>Everyone starts here. First to the gold beam wins.</p>
+      <p>There is no board button — walk onto a bus to ride it, and step off to get off.</p>
+      <div class="keys">
+        <div><b>WASD</b> walk &nbsp;&nbsp; <b>SHIFT</b> run &nbsp;&nbsp; <b>SPACE</b> jump</div>
+        <div><b>TAB</b> hold up your map &nbsp;&nbsp; <b>R</b> unstick</div>
+      </div>
+      <p style="margin-top:16px; color:#ffd166">click to play</p>
+    </div></div>
 
     <div id="results"><div class="card panel">
       <h2 id="r-title">Round over</h2>
