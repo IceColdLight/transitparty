@@ -100,7 +100,6 @@ function refreshMap(city: City, vehicles: ReturnType<typeof allVehicles>, player
 const keys = new Set<string>();
 let facing = 0, pitch = 0;
 let locked = false;
-const pending = new Set<string>();
 
 const typing = () => document.activeElement?.tagName === 'INPUT';
 addEventListener('keydown', (e) => {
@@ -110,7 +109,6 @@ addEventListener('keydown', (e) => {
   }
   const k = e.key.toLowerCase();
   if (k === 'tab' || k === ' ') e.preventDefault();
-  if (!keys.has(k) && k === 'r') pending.add('reset');
   keys.add(k);
 });
 addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
@@ -288,7 +286,6 @@ function frame(now: number) {
     type: 'walk', seq: 0, wx: wish.x, wy: wish.y, facing,
     sprint, jump,
   });
-  if (pending.delete('reset')) net.send({ type: 'action', action: 'reset' });
 
   // ── camera ──────────────────────────────────────────────────────────────
   camera.position.set(me.x, me.h + PLAYER.eye, me.y);

@@ -125,9 +125,6 @@ async function main() {
   check('and it does not move anybody else',
     Math.hypot(me(b).x - pad.x, me(b).y - pad.y) < 8, 'b stayed put');
 
-  a.send({ type: 'action', action: 'reset' });
-  await sleep(200);
-
   describe('boarding, which is just walking onto something');
 
   /**

@@ -174,12 +174,13 @@ export type C2SWalk = {
   jump: boolean;
 };
 /**
- * There is no board key any more — you get on things by walking onto them.
- * All that is left is unsticking yourself.
+ * The client can say two things: where it is trying to walk, and what to call
+ * itself. There is no board key — you get on things by walking onto them —
+ * and no reset either: walking off the grid recovers on its own, in
+ * shared/movement.ts.
  */
-export type C2SAction = { type: 'action'; action: 'reset' };
 export type C2SName = { type: 'name'; name: string };
-export type C2SMessage = C2SWalk | C2SAction | C2SName;
+export type C2SMessage = C2SWalk | C2SName;
 
 export type S2CWelcome = {
   type: 'welcome';

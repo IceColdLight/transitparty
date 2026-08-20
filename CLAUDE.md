@@ -196,6 +196,15 @@ Found by re-reading the code:
 - a `process.env` debug switch left in the scene would have thrown on load in a
   browser
 
+The R key is gone too, and it is worth saying why rather than just deleting it.
+It was labelled "unstick" and called `spawn()`, which teleported you to the
+ORIGIN — an escape hatch that cost you the race — and, because `spawn()` also
+clears `finished` and `place`, let a player who had already crossed the line
+un-finish themselves and leave the round unable to end. It was rewritten to
+snap you to the nearest street, and then removed outright: walking off the grid
+already recovers on its own in `stepBody`, so the button was a second answer to
+a question that already had one.
+
 Found by the integration suite, and only because it runs against live traffic:
 
 - **riders did not inherit the vehicle's ROTATION**, only its position, so the
