@@ -1,5 +1,6 @@
 import type { ModeId } from './constants.js';
 import type { River } from './river.js';
+import type { Block, Streets } from './streets.js';
 
 /** A station. Positions are world metres; the city is drawn to real geography. */
 export type Stop = {
@@ -46,13 +47,16 @@ export type Line = {
   offset: number;
 };
 
-/** Visual only. The city needs blocks to be legible; nothing collides with them. */
-export type Block = { x: number; y: number; w: number; h: number; park: boolean };
-
 export type City = {
   seed: number;
   stops: Stop[];
   lines: Line[];
+  /**
+   * The street grid. Not decoration: it is the only walkable surface in the
+   * city, buses and trams are laid along it, and every station sits on it.
+   */
+  streets: Streets;
+  /** Everything that is not a street. Solid. */
   blocks: Block[];
   /**
    * The water and its bridges. Not scenery: you cannot walk across the river

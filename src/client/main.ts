@@ -18,7 +18,7 @@
 import { ARRIVE_RADIUS, BOARD_RADIUS, INTERP_DELAY_MS, RACE } from '../shared/constants.js';
 import { buildCity } from '../shared/city.js';
 import { stepWalk, type Walker } from '../shared/movement.js';
-import { allVehicles, departures, vehicleById } from '../shared/vehicles.js';
+import { allVehicles, vehicleById } from '../shared/vehicles.js';
 import type { City, PlayerState, Vehicle, WorldState } from '../shared/types.js';
 import { connect } from './net.js';
 import { mapHeld, readWalkWish, take } from './input.js';
@@ -42,7 +42,7 @@ const ctx = canvas.getContext('2d')!;
 const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const odFrom = el('od-from'), odTo = el('od-to'), clockEl = el('clock'), parEl = el('par');
 const sWhat = el('s-what'), sNext = el('s-next'), sTogo = el('s-togo');
-const standingsEl = el('standings'), boardEl = el('board'), promptEl = el('prompt');
+const standingsEl = el('standings'), promptEl = el('prompt');
 const netEl = el('status-net'), nameEl = el<HTMLInputElement>('name');
 const resultsEl = el('results'), rTitle = el('r-title'), rSub = el('r-sub');
 const rRows = el('r-rows'), rNext = el('r-next');
@@ -55,8 +55,8 @@ const mapHintEl = el('maphint');
  * thing you could not see.
  *
  * Deliberately not everything: the race header (where you are going), the
- * departure board (what is leaving from under your feet) and the standings are
- * exactly what you want while planning, and all three sit clear of the legend.
+ * standings are exactly what you want while planning, and both sit clear of
+ * the legend.
  */
 const dimUnderMap = [el('status'), el('hint'), nameEl];
 
@@ -133,14 +133,36 @@ function playersAt(t: number, vehicleOf: (id: string) => Vehicle | null): Player
   return out;
 }
 
-/** The departure board is expensive to build and changes once a second. */
-let depCache: { stop: number; at: number; rows: ReturnType<typeof departures> } | null = null;
-function departuresFor(c: City, stop: number, t: number) {
-  if (depCache && depCache.stop === stop && t - depCache.at < 0.4) return depCache.rows;
-  const rows = departures(c, stop, t, 420);
-  depCache = { stop, at: t, rows };
-  return rows;
-}
+/*
+ * DEPARTURE BOARD — disabled for now.
+ *
+ * It listed what was leaving from under your feet and when. Commented out
+ * rather than deleted, along with its markup in index.html and the block that
+ * filled it below, because it is a big lever on how the game reads and the
+ * question of whether it belongs is open.
+ *
+ * The argument for pulling it: the map already shows every vehicle in the city
+ * live, so the board was a convenience layer over information the player
+ * already has. Without it you have to look at the network and work out what is
+ * coming, which is the game.
+ *
+ * The argument against, for when this gets revisited: the board is the only
+ * thing that ever told you which DIRECTION a vehicle was going. On the map a
+ * tram approaching your stop and a tram leaving it look identical until you
+ * watch it for a second, and boarding the right line the wrong way is the
+ * most common way to lose one of these races. If the board stays out,
+ * direction has to be legible somewhere else.
+ *
+ * `departures()` in shared/vehicles.ts is still live and still tested.
+ *
+ * let depCache: { stop: number; at: number; rows: ReturnType<typeof departures> } | null = null;
+ * function departuresFor(c: City, stop: number, t: number) {
+ *   if (depCache && depCache.stop === stop && t - depCache.at < 0.4) return depCache.rows;
+ *   const rows = departures(c, stop, t, 140);
+ *   depCache = { stop, at: t, rows };
+ *   return rows;
+ * }
+ */
 
 let lastFrame = performance.now();
 
@@ -169,7 +191,7 @@ function frame(now: number) {
   if (myVehicle) {
     me.x = myVehicle.x; me.y = myVehicle.y; me.vx = 0; me.vy = 0;
   } else if (server) {
-    stepWalk(me, wish.x, wish.y, dt, c.river);
+    stepWalk(me, wish.x, wish.y, dt, c.streets, c.river);
     // Soft reconciliation. The walk is cheap and deterministic, so the two
     // only ever differ by a packet's worth of lag; yanking would be visible
     // and drifting would not.
@@ -215,8 +237,6 @@ function frame(now: number) {
     const d = Math.hypot(s.x - me.x, s.y - me.y);
     if (d < nearD) { nearD = d; near = s.id; }
   }
-  const atStop = nearD < 46 ? near : -1;
-
   const boardable = !myVehicle && vehicles.find(
     (v) => v.atStop >= 0 && Math.hypot(v.x - me.x, v.y - me.y) <= BOARD_RADIUS,
   );
@@ -252,22 +272,22 @@ function frame(now: number) {
     promptEl.innerHTML = `<span style="color:#ffd166">walk to ${dest.name}</span>`;
   } else promptEl.innerHTML = '';
 
-  // ── the departure board ─────────────────────────────────────────────────
-  if (atStop >= 0 && !myVehicle && racing) {
-    const stop = c.stops[atStop];
-    const rows = departuresFor(c, atStop, simTime).slice(0, 6);
-    boardEl.style.display = 'block';
-    boardEl.innerHTML = `<div class="hd">departures · <b>${stop.name}</b></div>` +
-      (rows.length ? rows.map((d) => {
-        const line = c.lines[d.line];
-        const secs = Math.max(0, Math.round(d.in));
-        const cls = secs === 0 ? 'now' : secs < 20 ? 'soon' : '';
-        return `<div class="dep">` +
-          `<span class="badge" style="background:${line.color}">${line.name}</span>` +
-          `<span class="dest">${c.stops[d.towards].name}</span>` +
-          `<span class="in ${cls}">${secs === 0 ? 'HERE' : `${secs}s`}</span></div>`;
-      }).join('') : '<div class="dep"><span class="dest">nothing calls here</span></div>');
-  } else boardEl.style.display = 'none';
+  // ── the departure board — disabled, see the note above ──────────────────
+  // if (atStop >= 0 && !myVehicle && racing) {
+  //   const stop = c.stops[atStop];
+  //   const rows = departuresFor(c, atStop, simTime).slice(0, 6);
+  //   boardEl.style.display = 'block';
+  //   boardEl.innerHTML = `<div class="hd">departures · <b>${stop.name}</b></div>` +
+  //     (rows.length ? rows.map((d) => {
+  //       const line = c.lines[d.line];
+  //       const secs = Math.max(0, Math.round(d.in));
+  //       const cls = secs === 0 ? 'now' : secs < 20 ? 'soon' : '';
+  //       return `<div class="dep">` +
+  //         `<span class="badge" style="background:${line.color}">${line.name}</span>` +
+  //         `<span class="dest">${c.stops[d.towards].name}</span>` +
+  //         `<span class="in ${cls}">${secs === 0 ? 'HERE' : `${secs}s`}</span></div>`;
+  //     }).join('') : '<div class="dep"><span class="dest">nothing calls here</span></div>');
+  // } else boardEl.style.display = 'none';
 
   // ── standings ───────────────────────────────────────────────────────────
   const ranked = [...curr.players].sort((a, b) => {

@@ -11,6 +11,7 @@ import { CITY, WALK } from '../src/shared/constants.js';
 import { buildCity } from '../src/shared/city.js';
 import { stepWalk, type Walker } from '../src/shared/movement.js';
 import { bankOf, illegalCrossing, nearestOnRiver } from '../src/shared/river.js';
+import { bridgeSites, onStreet } from '../src/shared/streets.js';
 import { walkNeighbours } from '../src/shared/routing.js';
 import { check, describe, note, report } from './harness.js';
 
@@ -21,7 +22,8 @@ describe(`the water — seed ${city.seed}`);
 note(`${river.bridges.length} bridges, ${river.poly.length}-point channel`);
 
 check('the river reaches both edges of the map, so it really divides it',
-  river.poly[0].x < 0 || river.poly[0].y < 0 || river.poly[0].x > CITY.width || river.poly[0].y > CITY.height,
+  river.poly[0].x < 0 || river.poly[0].y < 0
+  || river.poly[0].x > CITY.width || river.poly[0].y > CITY.height,
   `starts at ${river.poly[0].x.toFixed(0)},${river.poly[0].y.toFixed(0)}`);
 
 const banks = city.stops.map((s) => bankOf(river, s));
@@ -32,53 +34,35 @@ check('both banks have a real share of the city',
 
 describe('walking into it');
 
-/** Two points straight across the water, far from any bridge. */
-function crossingPair(): [Walker, { x: number; y: number }] | null {
-  const total = river.poly.length;
-  for (let i = 3; i < total - 3; i++) {
-    const p = river.poly[i];
-    if (p.x < 200 || p.x > CITY.width - 200 || p.y < 200 || p.y > CITY.height - 200) continue;
-    let clearOfBridges = true;
-    for (const b of river.bridges) if (Math.hypot(b.x - p.x, b.y - p.y) < 400) clearOfBridges = false;
-    if (!clearOfBridges) continue;
-    const q = river.poly[i + 1];
-    const nx = -(q.y - p.y), ny = q.x - p.x;
-    const len = Math.hypot(nx, ny) || 1;
-    return [
-      { x: p.x - (nx / len) * 120, y: p.y - (ny / len) * 120, vx: 0, vy: 0 },
-      { x: p.x + (nx / len) * 120, y: p.y + (ny / len) * 120 },
-    ];
-  }
-  return null;
-}
+/**
+ * Walking is confined to the streets, so this has to be tested where a street
+ * actually meets the water. `bridgeSites` lists every such place; a few were
+ * chosen to carry bridges and the rest are quaysides — a road that runs into a
+ * river and stops.
+ */
+const sites = bridgeSites(city.streets, river);
+const quays = sites.filter((p) =>
+  river.bridges.every((b) => Math.hypot(b.x - p.x, b.y - p.y) > 260));
+note(`${sites.length} streets meet the water; ${river.bridges.length} of them carry a bridge`);
+check('most streets that reach the river simply stop at it', quays.length >= 1,
+  `${quays.length} quaysides`);
 
-const pair = crossingPair();
-check('the map has a stretch of open water to test against', pair !== null);
+if (quays.length) {
+  const q = quays[Math.floor(quays.length / 2)];
+  const near = nearestOnRiver(river, { x: q.x + 1, y: q.y });
+  const len = Math.hypot(q.x - near.x, q.y - near.y) || 1;
+  // Along the road, straight at the water.
+  const dir = { x: -(q.y - near.y) / len, y: (q.x - near.x) / len };
+  const w: Walker = { x: q.x - dir.x * 130, y: q.y - dir.y * 130, vx: 0, vy: 0 };
+  const startBank = bankOf(river, w);
+  check('the test walker starts on a street', onStreet(city.streets, w),
+    `${w.x.toFixed(0)},${w.y.toFixed(0)}`);
 
-if (pair) {
-  const [start, target] = pair;
-  const startBank = bankOf(river, start);
-  check('the two test points are on opposite banks',
-    startBank !== bankOf(river, target), `${startBank} vs ${bankOf(river, target)}`);
-
-  const w: Walker = { ...start };
-  const dx = target.x - w.x, dy = target.y - w.y;
-  const len = Math.hypot(dx, dy);
-  // Walk straight at the far bank for a minute, which is four times as long
-  // as it would take on dry land.
-  for (let i = 0; i < 60 / (1 / 30); i++) stepWalk(w, dx / len, dy / len, 1 / 30, river);
-  check('you cannot walk across the river away from a bridge',
+  const from = { x: w.x, y: w.y };
+  for (let i = 0; i < 30 * 60; i++) stepWalk(w, dir.x, dir.y, 1 / 30, city.streets, river);
+  check('you cannot walk across the river where there is no bridge',
     bankOf(river, w) === startBank,
-    `ended ${Math.hypot(w.x - start.x, w.y - start.y).toFixed(0)}m along, still on bank ${bankOf(river, w)}`);
-
-  // And having been stopped, you are not welded to the spot: the axis-split
-  // retry has to leave you sliding along the bank towards a bridge.
-  const slid: Walker = { ...start };
-  const along = { x: -dy / len, y: dx / len };
-  for (let i = 0; i < 300; i++) stepWalk(slid, (dx / len + along.x) / 1.414, (dy / len + along.y) / 1.414, 1 / 30, river);
-  check('but a diagonal into the bank slides you along it rather than sticking',
-    Math.hypot(slid.x - start.x, slid.y - start.y) > 12,
-    `${Math.hypot(slid.x - start.x, slid.y - start.y).toFixed(0)}m travelled in 10s`);
+    `walked ${Math.hypot(w.x - from.x, w.y - from.y).toFixed(0)}m up the road and stopped at the water`);
 }
 
 describe('crossing at a bridge');
@@ -86,25 +70,25 @@ describe('crossing at a bridge');
 let bridged = 0;
 for (const b of river.bridges) {
   const near = nearestOnRiver(river, { x: b.x + 1, y: b.y });
-  const nx = b.x - near.x, ny = b.y - near.y;
-  const len = Math.hypot(nx, ny) || 1;
-  // Approach along the deck: perpendicular to the water at the bridge.
-  const dir = { x: -ny / len, y: nx / len };
+  const len = Math.hypot(b.x - near.x, b.y - near.y) || 1;
+  const dir = { x: -(b.y - near.y) / len, y: (b.x - near.x) / len };
   const w: Walker = { x: b.x - dir.x * 90, y: b.y - dir.y * 90, vx: 0, vy: 0 };
   const startBank = bankOf(river, w);
   for (let i = 0; i < 30 * 120; i++) {
-    stepWalk(w, dir.x, dir.y, 1 / 30, river);
+    stepWalk(w, dir.x, dir.y, 1 / 30, city.streets, river);
     if (bankOf(river, w) !== startBank) break;
   }
   if (bankOf(river, w) !== startBank) bridged++;
 }
 check('every bridge actually gets you to the other side',
   bridged === river.bridges.length, `${bridged}/${river.bridges.length}`);
+check('and every bridge is on a street, not in the middle of a block',
+  river.bridges.every((b) => onStreet(city.streets, b)), `${river.bridges.length} bridges`);
 
 describe('the planner knows about it');
 
 const nb = walkNeighbours(city);
-let bogus = 0, blocked = 0;
+let bogus = 0;
 for (let i = 0; i < city.stops.length; i++) {
   for (const w of nb[i]) {
     if (illegalCrossing(river, city.stops[i], city.stops[w.to], CITY.bridgeRadius)) bogus++;
@@ -113,12 +97,12 @@ for (let i = 0; i < city.stops.length; i++) {
 check('no walking transfer in the planner crosses open water', bogus === 0, `${bogus} bogus edges`);
 
 /**
- * The good moment the river buys: two stops close enough to stroll between
- * and no way to do it. It does not happen in every city — the water has to
- * run past a pair of stations for it to — and it should not be forced, but if
- * it stops happening at all the riverside has quietly been emptied again.
+ * The good moment the river buys: two stops close enough to stroll between and
+ * no way to do it. It does not happen in every city — the water has to run
+ * past a pair of stations for it to — and it should not be forced, but if it
+ * stops happening at all the riverside has quietly been emptied.
  */
-let citiesWithCut = 0;
+let citiesWithCut = 0, blocked = 0;
 const SEEDS = 40;
 for (let seed = 1; seed <= SEEDS; seed++) {
   const c = buildCity(seed);

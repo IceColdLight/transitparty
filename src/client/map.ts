@@ -317,11 +317,22 @@ export function drawMap(
       ctx.font = '700 12px system-ui, sans-serif';
       ctx.fillStyle = '#c3d0dc';
       ctx.fillText(MODES[st.mode].label, bx + 16, y);
+      /**
+       * Speed as a MULTIPLE OF WALKING, not km/h.
+       *
+       * The city runs at TEMPO times real life, so the honest km/h figures
+       * come out at 197 for a train and — the giveaway — 26 on foot, which is
+       * a sprinter. Dividing them back down would have been worse: the speeds
+       * would have read as real while the clock beside them still ran at game
+       * pace. A multiple of walking is true in either frame, it is the
+       * comparison the player is actually making, and it makes the "on foot"
+       * row at the bottom the unit rather than an afterthought.
+       */
       const mins = Math.floor(st.headway / 60), secs = Math.round(st.headway % 60);
       ctx.font = '700 11px system-ui, sans-serif';
       ctx.fillStyle = '#8b9aa8';
       ctx.textAlign = 'right';
-      ctx.fillText(`${(st.speed * 3.6).toFixed(0)} km/h · every ${mins}:${String(secs).padStart(2, '0')}`,
+      ctx.fillText(`${(st.speed / WALK.speed).toFixed(1)}× walking · every ${mins}:${String(secs).padStart(2, '0')}`,
         bx + bw - 16, y);
       ctx.textAlign = 'left';
       y += 8;
@@ -341,7 +352,7 @@ export function drawMap(
     ctx.fillText('on foot', bx + 16, y);
     ctx.font = '700 11px system-ui, sans-serif';
     ctx.textAlign = 'right';
-    ctx.fillText(`${(WALK.speed * 3.6).toFixed(0)} km/h`, bx + bw - 16, y);
+    ctx.fillText('walking pace', bx + bw - 16, y);
     ctx.textAlign = 'left';
     y += 8;
     ctx.fillStyle = 'rgba(255,255,255,0.07)';

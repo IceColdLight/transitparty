@@ -9,7 +9,7 @@
 import { CITY, MODES, RACE, WALK, type ModeId } from '../src/shared/constants.js';
 import { buildCity } from '../src/shared/city.js';
 import { bestRoute, walkNeighbours } from '../src/shared/routing.js';
-import { bankOf } from '../src/shared/river.js';
+import { bankOf, illegalCrossing } from '../src/shared/river.js';
 import { avg, check, describe, note, pct, report } from './harness.js';
 
 const N = 120;
@@ -90,18 +90,36 @@ check('no line is shorter than three stops', tooShort === 0, `${tooShort} lines`
 check('every line has one leg per gap, all positive', badLegs === 0, `${badLegs} bad`);
 
 /**
- * Only a handful of lines get over the water. This is the chokepoint the
- * first cities lacked; if it drifts upward the network goes back to being a
- * mesh and the optimal route collapses to one change.
+ * The chokepoint. What matters is not how many lines cross the water — once
+ * buses were routed along the streets, several of them naturally picked up a
+ * bridge and the count went from four to as many as eight — but that every
+ * single crossing in the city happens at one of the three bridges. Eight lines
+ * over three bridges is still three places, and three places is still a
+ * decision. A crossing anywhere else would be a line swimming.
  */
+let wildCrossings = 0, crossingsTotal = 0;
+for (const c of cities) {
+  for (const l of c.lines) {
+    for (let i = 0; i + 1 < l.stops.length; i++) {
+      const a = c.stops[l.stops[i]], b = c.stops[l.stops[i + 1]];
+      if (bankOf(c.river, a) === bankOf(c.river, b)) continue;
+      crossingsTotal++;
+      if (illegalCrossing(c.river, a, b, CITY.bridgeRadius)) wildCrossings++;
+    }
+  }
+}
+check('every crossing of the water in every city is at a bridge',
+  wildCrossings === 0, `${wildCrossings} of ${crossingsTotal} crossings were not`);
+
 const crossingCounts = cities.map((c) => c.lines.filter((l) => {
   let seen = 0;
   for (const s of l.stops) seen |= bankOf(c.river, c.stops[s]) === 1 ? 1 : 2;
   return seen === 3;
 }).length);
-check('only a few lines cross the river', Math.max(...crossingCounts) <= 7,
+check('and the far bank hangs off a handful of lines, not most of them',
+  Math.max(...crossingCounts) <= 10,
   `avg ${avg(crossingCounts).toFixed(1)}, worst ${Math.max(...crossingCounts)} of ~18 lines`);
-check('but at least one does, or a bank is stranded',
+check('but at least one crosses, or a bank is stranded',
   Math.min(...crossingCounts) >= 1, `min ${Math.min(...crossingCounts)}`);
 
 check('every city has at least one bridge',

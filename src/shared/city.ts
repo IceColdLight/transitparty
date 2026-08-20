@@ -29,11 +29,15 @@
  * And only four lines cross the water. That is the chokepoint the first
  * cities lacked; see river.ts for the measurements that forced it.
  */
-import { CITY, FLEET, MODES, RACE, type ModeId } from './constants.js';
+import { CITY, FLEET, MODES, RACE, TEMPO, type ModeId } from './constants.js';
 import { type Rng, pick, range, rng } from './rng.js';
 import { type River, bankOf, illegalCrossing } from './river.js';
-import { type Net, bestRoute, walkNeighbours, walkTime } from './routing.js';
-import type { Block, City, Line, Stop } from './types.js';
+import { type Net, bestRoute, pedestrian, walkNeighbours, walkTime } from './routing.js';
+import {
+  type Block, type Streets, bridgeSites, makeBlocks, makeStreets, nearestJunction,
+  onStreet, snapToStreet, streetRoute,
+} from './streets.js';
+import type { City, Line, Stop } from './types.js';
 
 type Pt = { x: number; y: number };
 
@@ -124,35 +128,12 @@ function placeAlong(r: Rng, poly: Pt[], spacing: number): Pt[] {
   return out;
 }
 
-function makeBlocks(r: Rng): Block[] {
-  const out: Block[] = [];
-  const rec = (x: number, y: number, w: number, h: number, d: number) => {
-    if (w <= 30 || h <= 30) return;
-    if (d >= 7 || (w < 200 && h < 200)) {
-      out.push({ x, y, w, h, park: r() < 0.10 });
-      return;
-    }
-    const vert = w > h ? r() < 0.85 : r() < 0.15;
-    const f = range(r, 0.36, 0.64);
-    const street = range(r, 14, 26);
-    if (vert) {
-      const cut = w * f;
-      rec(x, y, cut - street / 2, h, d + 1);
-      rec(x + cut + street / 2, y, w - cut - street / 2, h, d + 1);
-    } else {
-      const cut = h * f;
-      rec(x, y, w, cut - street / 2, d + 1);
-      rec(x, y + cut + street / 2, w, h - cut - street / 2, d + 1);
-    }
-  };
-  rec(0, 0, CITY.width, CITY.height, 0);
-  return out;
-}
-
 /**
- * The river, and the handful of bridges on it. Bridges are spaced along the
- * water rather than placed where they would be convenient — a crossing you
- * have to go out of your way for is the entire point.
+ * The river. Bridges are chosen separately, from the points at which STREETS
+ * run into the water — a bridge has to be on a road, or it is a crossing you
+ * would have to climb a building to reach. They are then spread along the
+ * water rather than placed where they would be convenient, because a crossing
+ * you have to go out of your way for is the entire point.
  */
 function makeRiver(r: Rng): River {
   const vertical = r() < 0.5;
@@ -174,25 +155,49 @@ function makeRiver(r: Rng): River {
     poly.push({ x: a.x + dx * t + nx * off, y: a.y + dy * t + ny * off });
   }
 
-  const total = polyLength(poly);
-  const bridges: Pt[] = [];
-  for (let i = 0; i < CITY.bridges; i++) {
-    const t = (i + 1) / (CITY.bridges + 1) + range(r, -0.09, 0.09);
-    const p = alongPoly(poly, total * t);
-    // A bridge outside the map is not a bridge. Pull it back along the water
-    // until it is somewhere a player can actually stand.
-    if (p.x > 40 && p.x < CITY.width - 40 && p.y > 40 && p.y < CITY.height - 40) bridges.push(p);
+  return { poly, bridges: [] };
+}
+
+/** Spread the bridges out along the water, choosing from the street crossings. */
+function chooseBridges(sites: Pt[], want: number): Pt[] {
+  if (sites.length <= want) return sites.slice();
+  const out: Pt[] = [];
+  for (let i = 0; i < want; i++) {
+    out.push(sites[Math.round(((i + 1) / (want + 1)) * (sites.length - 1))]);
   }
-  if (bridges.length === 0) bridges.push(alongPoly(poly, total * 0.5));
-  return { poly, bridges };
+  return out;
+}
+
+/**
+ * Stops along a street route. Unlike `placeAlong` this ALWAYS keeps the
+ * corners, which is what makes a line's stop list its true geometry: every
+ * consecutive pair is then a straight run down one street, so a vehicle
+ * driving from one to the next stays on the road and never cuts a block.
+ */
+function placeOnPath(r: Rng, path: Pt[], spacing: number): Pt[] {
+  const out: Pt[] = [path[0]];
+  for (let i = 0; i + 1 < path.length; i++) {
+    const a = path[i], b = path[i + 1];
+    const len = dist(a, b);
+    const n = Math.max(1, Math.round(len / spacing));
+    for (let k = 1; k < n; k++) {
+      const t = (k + range(r, -0.18, 0.18)) / n;
+      out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    }
+    out.push(b);
+  }
+  return out;
 }
 
 /** Everything except the race: the network itself. */
 export function generateNet(seed: number): {
-  stops: Stop[]; lines: Line[]; blocks: Block[]; river: River; hub: number;
+  stops: Stop[]; lines: Line[]; streets: Streets; blocks: Block[]; river: River; hub: number;
 } {
   const r = rng(seed);
+  const streets = makeStreets(r);
   const river = makeRiver(r);
+  // Bridges go where streets already meet the water, then get spread out.
+  river.bridges = chooseBridges(bridgeSites(streets, river), CITY.bridges);
 
   const stops: Stop[] = [];
   const usedNames = new Set<string>();
@@ -208,8 +213,19 @@ export function generateNet(seed: number): {
     return `${n} ${i}`;
   };
 
-  /** Merge-on-place. This one line is the entire interchange system. */
-  const addStop = (p: Pt): number => {
+  /**
+   * Merge-on-place, and snap-to-street on the way in.
+   *
+   * The merge is the entire interchange system: two stops closer than 78m ARE
+   * one station, so a bus laid across a tram is absorbed into it.
+   *
+   * The snap is what keeps every station reachable. Buses and trams are on the
+   * road already, but a metro is not — it is under the city and its corridor
+   * runs wherever it likes. Its ENTRANCES still have to be somewhere a person
+   * can stand, which means on a street.
+   */
+  const addStop = (raw: Pt): number => {
+    const p = onStreet(streets, raw) ? raw : snapToStreet(streets, raw);
     for (const s of stops) if (Math.hypot(s.x - p.x, s.y - p.y) <= CITY.mergeRadius) return s.id;
     const id = stops.length;
     stops.push({ id, name: newName(), x: p.x, y: p.y, lines: [] });
@@ -237,7 +253,12 @@ export function generateNet(seed: number): {
       if (!illegalCrossing(river, p, { x: p.x + 70, y: p.y }, CITY.bridgeRadius)
         && !illegalCrossing(river, p, { x: p.x - 70, y: p.y }, CITY.bridgeRadius)
         && !illegalCrossing(river, p, { x: p.x, y: p.y + 70 }, CITY.bridgeRadius)
-        && !illegalCrossing(river, p, { x: p.x, y: p.y - 70 }, CITY.bridgeRadius)) return p;
+        && !illegalCrossing(river, p, { x: p.x, y: p.y - 70 }, CITY.bridgeRadius)) {
+        // Anchors are junctions, so a route between two of them is a route a
+        // bus could drive. Metros ignore this and it costs them nothing.
+        const j = nearestJunction(streets, p);
+        return bankOf(river, j) === bank ? j : p;
+      }
     }
     return null;
   };
@@ -313,7 +334,13 @@ export function generateNet(seed: number): {
    */
   const addLine = (mode: ModeId, poly: Pt[], via?: Pt): Line | null => {
     const spec = MODES[mode];
-    const pts = placeAlong(r, poly, spec.spacing * range(r, 0.88, 1.12));
+    // A road mode's polyline IS its route, corners and all, and every corner
+    // has to become a stop or the vehicle will cut it. A rail mode's polyline
+    // is a smooth corridor that gets sampled — it is under the city, so what
+    // it drives through is nobody's business.
+    const onRoad = mode === 'bus' || mode === 'tram';
+    const spacing = spec.spacing * range(r, 0.88, 1.12);
+    const pts = onRoad ? placeOnPath(r, poly, spacing) : placeAlong(r, poly, spacing);
     if (via) {
       let best = 0;
       for (let i = 1; i < pts.length; i++) if (dist(pts[i], via) < dist(pts[best], via)) best = i;
@@ -344,12 +371,49 @@ export function generateNet(seed: number): {
     }
     if (ids.length < 3) return rewind();
 
+    /**
+     * A road line's stop list IS its geometry: a vehicle drives straight from
+     * each stop to the next, so every consecutive pair has to be along one
+     * street or the bus takes a short cut through a building.
+     *
+     * Placing the stops on the route guarantees that; MERGING can undo it. A
+     * corner stop that lands within 78m of an existing station is absorbed
+     * into it, and if that station is round the corner on the cross street the
+     * turn quietly disappears and the leg becomes a diagonal. It showed up as
+     * buses sitting in the middle of blocks.
+     *
+     * The tolerance is half a carriageway: on a street, or not on one.
+     */
+    if (onRoad) {
+      for (let i = 0; i + 1 < ids.length; i++) {
+        const a = stops[ids[i]], b = stops[ids[i + 1]];
+        if (Math.min(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) > streets.width / 2) return rewind();
+      }
+    }
+
+    /**
+     * And the same argument about the water. `crosses()` vets the CORRIDOR,
+     * but a line's real geometry is its stop list — and stops move after the
+     * corridor is drawn: they snap onto the nearest street and then merge with
+     * anything within 78m. Either can shuffle a stop to the far bank and leave
+     * a leg swimming across open water. Nine legs in 528 were doing exactly
+     * that, all of them past a corridor that had been checked and passed.
+     *
+     * Validate what will actually be drawn and ridden, not what it was drawn
+     * from.
+     */
+    for (let i = 0; i + 1 < ids.length; i++) {
+      if (illegalCrossing(river, stops[ids[i]], stops[ids[i + 1]], CITY.bridgeRadius)) return rewind();
+    }
+
     const legs: number[] = [];
     let span = 0;
     for (let i = 0; i + 1 < ids.length; i++) {
       const d = dist(stops[ids[i]], stops[ids[i + 1]]);
       span += d;
-      legs.push(Math.max(4, d / spec.speed));
+      // A floor, so two stops dragged together by a merge do not produce a
+      // leg measured in tenths of a second. It is a duration, so it scales.
+      legs.push(Math.max(4 / TEMPO, d / spec.speed));
     }
     const oneWay = legs.reduce((a, b) => a + b, 0) + ids.length * spec.dwell;
 
@@ -387,19 +451,38 @@ export function generateNet(seed: number): {
 
   /** A line that gets over the water, built as two corridors meeting on a bridge. */
   const addCrossing = (mode: ModeId, bridge: Pt, bend: number) => {
+    const onRoad = mode === 'bus' || mode === 'tram';
     for (let k = 0; k < 20; k++) {
       const a = onBank(1), b = onBank(-1);
       if (!a || !b) continue;
-      const left = corridor(r, a, bridge, bend * 0.5);
-      const right = corridor(r, bridge, b, bend * 0.5);
-      const poly = left.concat(right.slice(1));
-      if (crosses(poly)) continue;
+      let poly: Pt[] | null;
+      if (onRoad) {
+        // A tram crosses on the bridge deck, like everything else on wheels.
+        const left = roadRoute(a, bridge, 1);
+        const right = roadRoute(bridge, b, 1);
+        poly = left && right ? left.concat(right.slice(1)) : null;
+      } else {
+        const left = corridor(r, a, bridge, bend * 0.5);
+        const right = corridor(r, bridge, b, bend * 0.5);
+        const joined = left.concat(right.slice(1));
+        poly = crosses(joined) ? null : joined;
+      }
+      if (!poly) continue;
       if (addLine(mode, poly, bridge)) return true;
     }
     return false;
   };
 
   const bridgeFor = (i: number) => river.bridges[i % river.bridges.length];
+
+  /** A road route between two anchors that stays on the grid and off the water. */
+  const roadRoute = (a: Pt, b: Pt, wander: number): Pt[] | null => {
+    for (let k = 0; k < 10; k++) {
+      const path = streetRoute(streets, r, a, b, wander);
+      if (path.length >= 2 && !crosses(path)) return path;
+    }
+    return null;
+  };
 
   // ── the crossings. Four lines, and the whole far bank hangs off them ─────
   addCrossing('train', bridgeFor(0), 90);
@@ -414,7 +497,10 @@ export function generateNet(seed: number): {
       const bank: 1 | -1 = i % 2 === 0 ? mainBank : (-mainBank as 1 | -1);
       const span = spanOn(bank, target);
       if (!span) continue;
-      const poly = safeCorridor(span[0], span[1], bend);
+      const onRoad = mode === 'bus' || mode === 'tram';
+      const poly = onRoad
+        ? roadRoute(span[0], span[1], mode === 'bus' ? 2 : 1)
+        : safeCorridor(span[0], span[1], bend);
       if (!poly) continue;
       // The trunk lines are pinned to the main station; without it the hub is
       // a name on a map rather than the place everyone changes.
@@ -427,7 +513,7 @@ export function generateNet(seed: number): {
   fill('tram', FLEET.tram - 1, 230, 1, 1700);
   fill('bus', FLEET.bus, 300, 0, 1100);
 
-  return { stops, lines, blocks: makeBlocks(r), river, hub };
+  return { stops, lines, streets, blocks: makeBlocks(streets, r), river, hub };
 }
 
 /**
@@ -448,10 +534,21 @@ export function generateNet(seed: number): {
 export function chooseRace(
   net: Net, r: Rng,
 ): City['par'] & { origin: number; destination: number } | null {
-  const nb = walkNeighbours(net);
+  const graph = pedestrian(net);
+  const nb = walkNeighbours(net, graph);
   const diag = Math.hypot(CITY.width, CITY.height);
   const served = net.stops.filter((s) => s.lines.length >= 1).map((s) => s.id);
   if (served.length < 8) return null;
+  // Walking is a shortest path over the streets now, so it costs a graph
+  // search rather than a subtraction. Origins repeat across candidates, so
+  // each one is searched once.
+  const walkFrom = new Map<number, number>();
+  const walkOf = (a: number, b: number) => {
+    const key = a * 100000 + b;
+    let t = walkFrom.get(key);
+    if (t === undefined) { t = walkTime(net, a, b, graph); walkFrom.set(key, t); }
+    return t;
+  };
   // Origins are drawn from interchanges only, so the round opens on a
   // decision. Sampling both ends from every stop and rejecting afterwards
   // threw away two thirds of the candidates for this alone.
@@ -490,7 +587,8 @@ export function chooseRace(
     if (!route) continue;
     if (route.transfers < RACE.minTransfers) continue;
     if (route.time < RACE.parMin || route.time > RACE.parMax) continue;
-    const walk = walkTime(net, a, b);
+    const walk = walkOf(a, b);
+    if (!isFinite(walk)) continue;
     const ratio = walk / route.time;
     if (ratio < RACE.minWalkRatio) continue;
 
@@ -526,7 +624,8 @@ export function chooseRace(
 
 /** The longest journey this network offers, used only when nothing qualified. */
 function fallbackRace(net: Net, r: Rng): City['par'] & { origin: number; destination: number } {
-  const nb = walkNeighbours(net);
+  const graph = pedestrian(net);
+  const nb = walkNeighbours(net, graph);
   const served = net.stops.filter((s) => s.lines.length >= 1).map((s) => s.id);
   let best: (City['par'] & { origin: number; destination: number }) | null = null;
   for (let k = 0; k < 300; k++) {
@@ -537,7 +636,7 @@ function fallbackRace(net: Net, r: Rng): City['par'] & { origin: number; destina
     if (best && route.time <= best.time) continue;
     best = {
       origin: a, destination: b,
-      time: route.time, transfers: route.transfers, walk: walkTime(net, a, b),
+      time: route.time, transfers: route.transfers, walk: walkTime(net, a, b, graph),
       strict: false, attempts: 0,
     };
   }

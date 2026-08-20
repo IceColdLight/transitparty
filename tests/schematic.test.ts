@@ -13,6 +13,7 @@
  */
 import { CITY } from '../src/shared/constants.js';
 import { buildCity } from '../src/shared/city.js';
+import { segIntersect } from '../src/shared/river.js';
 import { warp } from '../src/shared/schematic.js';
 import { avg, check, describe, note, report } from './harness.js';
 
@@ -59,20 +60,37 @@ check('the centre is enlarged relative to the edges',
 
 describe('what a diagram may not get wrong');
 
-let flipped = 0, legs = 0;
-for (const line of city.lines) {
-  for (let i = 0; i + 2 < line.stops.length; i++) {
-    const [a, b, c] = [line.stops[i], line.stops[i + 1], line.stops[i + 2]];
-    legs++;
-    // b sits between a and c on the ground; it must still sit between them on
-    // the map, or the diagram has reordered the line.
-    const realBetween = dist(city.stops[a], city.stops[b]) < dist(city.stops[a], city.stops[c]);
-    const mapBetween = dist(W[a], W[b]) < dist(W[a], W[c]);
-    if (realBetween !== mapBetween) flipped++;
+/**
+ * A diagram may distort distance as much as it likes; what it may not do is
+ * tangle a line with itself. If the warp pulls a route across its own path,
+ * the reader gets a junction that does not exist.
+ *
+ * This replaces an earlier check that asked whether the stop ORDER along a
+ * line survived, measured by comparing straight-line distances between
+ * consecutive triples. That property was never actually guaranteed — the warp
+ * is radial, so for three stops that are not collinear it can and does change
+ * which of them looks closer, and once buses were routed along a rectilinear
+ * street grid their legs stopped being collinear. It failed on 2 triples in
+ * 87 and it was the test that was wrong, not the map.
+ */
+const crossings = (pts: { x: number; y: number }[]) => {
+  let n = 0;
+  for (let i = 1; i < pts.length; i++) {
+    for (let j = i + 2; j < pts.length; j++) {
+      if (segIntersect(pts[i - 1], pts[i], pts[j - 1], pts[j])) n++;
+    }
   }
+  return n;
+};
+let introduced = 0, tangles = 0;
+for (const line of city.lines) {
+  const real = crossings(line.stops.map((s) => city.stops[s]));
+  const drawn = crossings(line.stops.map((s) => W[s]));
+  tangles += drawn;
+  if (drawn > real) introduced++;
 }
-check('the order of stops along every line survives the distortion',
-  flipped === 0, `${flipped} of ${legs} triples reordered`);
+check('the diagram never makes a line cross itself that did not already',
+  introduced === 0, `${introduced} lines tangled by the warp, ${tangles} crossings in total`);
 
 let moved = 0;
 for (let i = 0; i < city.stops.length; i++) {

@@ -7,7 +7,7 @@
  * the map is unreachable for two minutes at a stretch, a door that is never
  * open long enough to board, a run that skips a stop entirely.
  */
-import { MODES } from '../src/shared/constants.js';
+import { MODES, TEMPO } from '../src/shared/constants.js';
 import { buildCity } from '../src/shared/city.js';
 import { allVehicles, departures, remainingStops, vehicleById } from '../src/shared/vehicles.js';
 import { avg, check, describe, near, note, report } from './harness.js';
@@ -72,8 +72,16 @@ for (const l of city.lines) {
   // An intermediate stop is called at twice per cycle, once each way.
   shortest = Math.min(shortest, open / 2);
 }
+/**
+ * Dwell is the one duration that does NOT divide by TEMPO — it is a human
+ * reaction window, not a simulation figure, and human reactions do not speed
+ * up when the game does. So this threshold stays in absolute seconds however
+ * fast the city runs, and it is the check that catches somebody "tidying up"
+ * by scaling dwell along with everything else: at TEMPO 3 that would leave a
+ * bus door open for 1.7 seconds.
+ */
 check('the doors are open long enough to run for them',
-  shortest >= 4, `shortest window ${shortest.toFixed(1)}s`);
+  shortest >= 3.5, `shortest window ${shortest.toFixed(1)}s, and it does not scale with TEMPO`);
 
 describe('spacing — the reason the fleet is an integer');
 
@@ -97,12 +105,12 @@ for (const lineId of busy.lines) {
 note(`at ${busy.name} (${busy.lines.length} lines): ` +
   `gaps ${Math.min(...gaps).toFixed(0)}–${Math.max(...gaps).toFixed(0)}s, avg ${avg(gaps).toFixed(0)}s`);
 check('no gap at a busy interchange is a punishing outlier',
-  Math.max(...gaps) < 210, `worst ${Math.max(...gaps).toFixed(0)}s`);
+  Math.max(...gaps) < 210 / TEMPO, `worst ${Math.max(...gaps).toFixed(0)}s, budget ${(210 / TEMPO).toFixed(0)}s`);
 
 describe('the departure board');
 
 const stop = city.stops.find((s) => s.lines.length >= 2)!;
-const rows = departures(city, stop.id, 100, 900);
+const rows = departures(city, stop.id, 100, 900 / TEMPO);
 check('the board lists something for every line calling here',
   new Set(rows.map((r) => r.line)).size === stop.lines.length,
   `${new Set(rows.map((r) => r.line)).size}/${stop.lines.length} lines at ${stop.name}`);

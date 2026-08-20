@@ -3,15 +3,35 @@
  * above and followed around by a camera.
  *
  * This is the half of the game the schematic lies about. Everything here is
- * true — the distance between two stops is the distance you have to walk, the
- * river is where the river is, and the tram you can see two blocks away is
- * genuinely going to be at that platform in eleven seconds.
+ * true — the distance between two stops is the distance you have to WALK, the
+ * river is where the river is, and the tram two blocks away is genuinely going
+ * to be at that platform in eleven seconds.
+ *
+ * It deliberately does NOT draw the network. It used to lay every line out on
+ * the ground in full colour, which made the map on TAB redundant: you could
+ * plan an entire route from the street without ever opening the diagram, so
+ * the diagram was decoration and the game had one view instead of two. What
+ * you get down here now is what you would actually get down here — streets,
+ * buildings, water, and a station sign telling you what calls at it. Where
+ * those lines GO is a question for the map.
  */
-import { BOARD_RADIUS, MODES } from '../shared/constants.js';
+import { BOARD_RADIUS } from '../shared/constants.js';
 import { nearestOnRiver } from '../shared/river.js';
 import type { City, PlayerState, Vehicle } from '../shared/types.js';
 
 export type Camera = { x: number; y: number; scale: number };
+
+/**
+ * A stable pseudo-random number for a point in the world. Buildings need to
+ * vary and must not shimmer, and the alternative — putting a footprint list in
+ * the City — would put a few thousand rectangles into something the client
+ * rebuilds from a seed anyway.
+ */
+function hash2(x: number, y: number): number {
+  let h = (Math.imul(Math.round(x), 73856093) ^ Math.imul(Math.round(y), 19349663)) >>> 0;
+  h = Math.imul(h ^ (h >>> 15), 2246822507);
+  return ((h ^ (h >>> 13)) >>> 0) / 4294967296;
+}
 
 /** Vehicle body length in metres, by mode — a train reads as a train. */
 const CAR = { train: 46, metro: 34, tram: 22, bus: 13 } as const;
@@ -27,19 +47,6 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
-/** A polyline through the stops, smoothed at the corners so it reads as track. */
-function linePath(ctx: CanvasRenderingContext2D, pts: { x: number; y: number }[]) {
-  ctx.beginPath();
-  if (pts.length < 2) return;
-  ctx.moveTo(pts[0].x, pts[0].y);
-  for (let i = 1; i < pts.length - 1; i++) {
-    const mx = (pts[i].x + pts[i + 1].x) / 2;
-    const my = (pts[i].y + pts[i + 1].y) / 2;
-    ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
-  }
-  ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
-}
-
 export function drawWorld(
   ctx: CanvasRenderingContext2D,
   city: City,
@@ -51,7 +58,11 @@ export function drawWorld(
   t: number,
 ) {
   ctx.save();
-  ctx.fillStyle = '#0e1218';
+  // The ground IS the street: everything walkable is this colour, and every
+  // building is painted on top of it. That way the walkable surface is the
+  // figure rather than the gap, which is the right way round when the streets
+  // are the only place you can be.
+  ctx.fillStyle = '#2b313c';
   ctx.fillRect(0, 0, view.w, view.h);
 
   ctx.translate(view.w / 2, view.h / 2);
@@ -65,12 +76,43 @@ export function drawWorld(
   const onScreen = (x: number, y: number, pad = 0) =>
     x > x0 - pad && x < x1 + pad && y > y0 - pad && y < y1 + pad;
 
-  // ── ground: blocks and parks, with the streets showing through as gaps ──
+  // ── the blocks. Solid: you walk around these, never through them ────────
   for (const b of city.blocks) {
     if (b.x > x1 || b.x + b.w < x0 || b.y > y1 || b.y + b.h < y0) continue;
-    ctx.fillStyle = b.park ? '#16281c' : '#171c24';
-    roundRect(ctx, b.x, b.y, b.w, b.h, 5);
+    if (b.park) {
+      ctx.fillStyle = '#1d3a26';
+      roundRect(ctx, b.x, b.y, b.w, b.h, 7);
+      ctx.fill();
+      ctx.strokeStyle = '#25482f';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      continue;
+    }
+    // A block is not one building. Split it into footprints on a small grid,
+    // each with its own tone and a lit north-west edge, so what you are
+    // walking around reads as a row of buildings rather than a dark rectangle.
+    ctx.fillStyle = '#141922';
+    roundRect(ctx, b.x, b.y, b.w, b.h, 3);
     ctx.fill();
+    const cols = Math.max(1, Math.min(4, Math.round(b.w / 78)));
+    const rows = Math.max(1, Math.min(4, Math.round(b.h / 78)));
+    const cw = b.w / cols, ch = b.h / rows;
+    for (let cx = 0; cx < cols; cx++) {
+      for (let cy = 0; cy < rows; cy++) {
+        const gx = b.x + cx * cw, gy = b.y + cy * ch;
+        const n = hash2(gx, gy);
+        const inset = 1 + n * 2.5;
+        const w = cw - inset * 2, h = ch - inset * 2;
+        if (w < 6 || h < 6) continue;
+        const tone = 0x1a + Math.floor(n * 14);
+        ctx.fillStyle = `rgb(${tone}, ${tone + 4}, ${tone + 11})`;
+        roundRect(ctx, gx + inset, gy + inset, w, h, 2);
+        ctx.fill();
+        ctx.fillStyle = `rgba(255,255,255,${0.03 + n * 0.035})`;
+        roundRect(ctx, gx + inset, gy + inset, w, Math.min(4, h / 3), 1.5);
+        ctx.fill();
+      }
+    }
   }
 
   // ── the river, and the only ways across it ──────────────────────────────
@@ -103,32 +145,36 @@ export function drawWorld(
     ctx.restore();
   }
 
-  // ── the lines themselves, widest first so the thin ones stay visible ─────
-  const order = ['train', 'metro', 'tram', 'bus'] as const;
-  for (const mode of order) {
-    for (const line of city.lines) {
-      if (line.mode !== mode) continue;
-      const pts = line.stops.map((s) => city.stops[s]);
-      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-      ctx.lineWidth = MODES[mode].width + 5;
-      linePath(ctx, pts); ctx.stroke();
-      ctx.strokeStyle = line.color;
-      ctx.lineWidth = MODES[mode].width;
-      linePath(ctx, pts); ctx.stroke();
-    }
-  }
-
   // ── stops. Names come later, once nothing can be drawn over them ────────
   const showNames = cam.scale > 0.55;
   for (const s of city.stops) {
     if (!onScreen(s.x, s.y, 60)) continue;
     ctx.beginPath();
-    ctx.arc(s.x, s.y, s.lines.length > 1 ? 13 : 8.5, 0, Math.PI * 2);
+    ctx.arc(s.x, s.y, s.lines.length > 1 ? 14 : 9.5, 0, Math.PI * 2);
     ctx.fillStyle = '#f2f6fa';
     ctx.fill();
-    ctx.lineWidth = 3.5;
-    ctx.strokeStyle = '#0e1218';
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = '#12161d';
     ctx.stroke();
+
+    /**
+     * Which lines call here, as a row of pips under the sign. This is the one
+     * piece of network information the street keeps, and it is the difference
+     * between a station and a white dot: standing at a stop you have to know
+     * what you can board. It says nothing about where any of them GO, which is
+     * still the map's job.
+     */
+    if (cam.scale > 0.75 && s.lines.length) {
+      const pip = 5.5, gap = 3;
+      const total = s.lines.length * pip + (s.lines.length - 1) * gap;
+      let px = s.x - total / 2;
+      for (const id of s.lines) {
+        ctx.fillStyle = city.lines[id].color;
+        roundRect(ctx, px, s.y + 17, pip, pip * 1.7, 1.6);
+        ctx.fill();
+        px += pip + gap;
+      }
+    }
   }
 
   // ── where you are going ─────────────────────────────────────────────────
@@ -151,9 +197,22 @@ export function drawWorld(
     const line = city.lines[v.line];
     const len = CAR[line.mode];
     const wid = line.mode === 'bus' ? 8 : 11;
+
+    /**
+     * Buses and trams are ON the street and look it. A metro is underneath
+     * the city and a train is up on a viaduct, so between stations they are
+     * drawn faded — which is both honest about where they are and the reason
+     * they are allowed to cut straight across a block that a bus has to drive
+     * around. At a station they come back to full strength, because that is
+     * where they surface and where you can get on.
+     */
+    const buried = line.mode === 'metro' ? 0.32 : line.mode === 'train' ? 0.6 : 1;
+    const alpha = v.atStop >= 0 ? 1 : buried;
+
     ctx.save();
     ctx.translate(v.x, v.y);
     ctx.rotate(v.angle);
+    ctx.globalAlpha = alpha;
     if (v.atStop >= 0) {
       // Doors open. This halo is the single most important thing on screen:
       // it is the difference between a tram you can catch and one you cannot.
@@ -173,9 +232,16 @@ export function drawWorld(
     ctx.fillStyle = 'rgba(255,255,255,0.85)';
     roundRect(ctx, len / 2 - 5, -wid / 2 + 2, 4, wid - 4, 2);
     ctx.fill();
+    ctx.globalAlpha = 1;
     ctx.restore();
 
-    if (cam.scale > 0.5) {
+    // Label the ones you could act on: near enough to run for. At a
+    // 14-second headway the city holds 170-odd vehicles, and labelling all of
+    // them buried the station names under a drift of line numbers. Zoomed out
+    // on a train, "at a stop" alone was not selective enough either — every
+    // stop on screen had a bus in it.
+    const near = Math.hypot(v.x - cam.x, v.y - cam.y) < 300;
+    if (cam.scale > 0.5 && alpha > 0.5 && near) {
       // A dwelling vehicle sits exactly on its platform, so its label goes
       // BELOW it — above is where the station's own name lives, and the two
       // landing on each other made both unreadable at the one moment they
@@ -213,13 +279,17 @@ export function drawWorld(
     ctx.stroke();
 
     if (!me && cam.scale > 0.45) {
+      // Beside the pip, not above or below it: above is the station's name and
+      // below is the row of line pips, and a rival standing at a stop — which
+      // is most of the time — landed on one or the other.
       ctx.font = `700 ${Math.round(11 / cam.scale)}px system-ui, sans-serif`;
-      ctx.textAlign = 'center';
+      ctx.textAlign = 'left';
       ctx.lineWidth = 3.5 / cam.scale;
       ctx.strokeStyle = 'rgba(6,9,13,0.9)';
-      ctx.strokeText(p.name, p.x + ox, p.y + oy + 20);
+      ctx.strokeText(p.name, p.x + ox + 11, p.y + oy + 4);
       ctx.fillStyle = '#dfe8ee';
-      ctx.fillText(p.name, p.x + ox, p.y + oy + 20);
+      ctx.fillText(p.name, p.x + ox + 11, p.y + oy + 4);
+      ctx.textAlign = 'center';
     }
   }
 

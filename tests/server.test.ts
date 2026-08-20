@@ -15,7 +15,7 @@ import { spawn } from 'node:child_process';
 import { WebSocket } from 'ws';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BOARD_RADIUS } from '../src/shared/constants.js';
+import { BOARD_RADIUS, WALK } from '../src/shared/constants.js';
 import { buildCity } from '../src/shared/city.js';
 import { allVehicles } from '../src/shared/vehicles.js';
 import type { S2CMessage, WorldState } from '../src/shared/types.js';
@@ -93,14 +93,25 @@ async function main() {
 
   describe('walking');
 
+  /**
+   * Walk ALONG the street the origin sits on. An earlier version always
+   * walked east and failed on any seed where east was a building or the
+   * river — which read as "the server dropped my input" and was nothing of
+   * the kind.
+   */
+  const onVertical = city.streets.xs.some((x) => Math.abs(x - origin.x) <= city.streets.width / 2);
+  const dirX = onVertical ? 0 : 1, dirY = onVertical ? 1 : 0;
+  note(`origin sits on a ${onVertical ? 'north-south' : 'east-west'} street`);
+
   const before = { x: me(a).x, y: me(a).y };
-  a.send({ type: 'walk', seq: 0, wx: 1, wy: 0, facing: 0 });
+  a.send({ type: 'walk', seq: 0, wx: dirX, wy: dirY, facing: 0 });
   await sleep(1200);
   a.send({ type: 'walk', seq: 0, wx: 0, wy: 0, facing: 0 });
   await sleep(200);
   const moved = Math.hypot(me(a).x - before.x, me(a).y - before.y);
   check('walk input moves you, at about walking pace',
-    moved > 1.5 && moved < 5, `${moved.toFixed(1)}m in ~1.2s`);
+    moved > WALK.speed * 0.6 && moved < WALK.speed * 1.6,
+    `${moved.toFixed(1)}m in ~1.2s at ${WALK.speed.toFixed(1)} m/s`);
   check('and it does not move anybody else',
     Math.hypot(me(b).x - origin.x, me(b).y - origin.y) < 20, 'b stayed put');
 

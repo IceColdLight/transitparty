@@ -54,6 +54,95 @@ Corollaries, all of which were violated and cost real rework:
 
 ---
 
+## Time is compressed, distance is not
+
+`TEMPO` in constants.ts is 3. Every speed is multiplied by it and every
+duration divided by it, so the city runs three times faster than the real world
+while staying exactly the same size. Real-world numbers played like watching a
+timetable: the interesting part of this game is the decision, and at real
+speeds you spend four fifths of a round waiting to find out whether it was
+right.
+
+Compressing time rather than shrinking the city is what keeps every ratio the
+design was tuned around: walking is still the same multiple worse than riding,
+a transfer still costs the same fraction of a journey, par sits the same
+distance from the round timer.
+
+**Two things deliberately do not scale, and both are human rather than
+mechanical:**
+
+- **`dwell`** — the seconds a vehicle stands with its doors open. It is your
+  window to notice a tram, run, and press a key, and reaction time does not
+  speed up when the game does. Divided by three like everything else, a bus
+  door would be open for 1.7 seconds, which is not a timing challenge, it is a
+  coin toss. `tests/vehicles.test.ts` holds the floor in absolute seconds
+  precisely so somebody "tidying up" cannot scale it.
+- **`intermissionSeconds`** — reading a scoreboard is not faster on a fast map.
+
+That has one knock-on worth knowing about. Because dwell stays put while
+everything else shrinks, stopping becomes a bigger share of a journey and
+transit comes out about a fifth slower relative to walking than a straight
+third would give. The par window's numerators had to widen to match: scaled by
+a plain third, par topped out at 132s against a 133s ceiling and the generator
+began rejecting exactly the long multi-change races that are the good ones.
+
+---
+
+## The street grid, and who has to respect it
+
+`streets.ts` is a rectilinear, irregularly spaced grid, and it does three jobs:
+
+1. **It is the only thing you can walk on.** Blocks are solid. Walking is a
+   shortest path over the pedestrian graph, around buildings and via bridges,
+   and it averages **1.30x** the distance a ruler gives.
+2. **Buses and trams are laid along it**, in staircase routes that turn at
+   junctions.
+3. **Metros and trains ignore it completely**, because one is underground and
+   one is on a viaduct. Between stations they are drawn faded, which is both
+   honest about where they are and the reason they are allowed to cut across a
+   block that a bus has to drive around.
+
+Their STATIONS are the exception to (3): every stop is snapped onto a street on
+the way in, because a station in the middle of a block is a station nobody can
+ever board at. That one fails completely silently — nothing throws, the race
+is just unwinnable — so `tests/streets.test.ts` checks it on every stop of
+every city.
+
+Two bugs came out of this and both have the same shape: **a line's real
+geometry is its STOP LIST, not the corridor it was drawn from.** Stops move
+after the corridor is validated — they snap to the nearest street, then merge
+with anything within 78m — and both moves can invalidate what was checked.
+
+- a corner stop absorbed into a station round the corner deleted the turn, and
+  the leg became a diagonal. It showed up as **buses sitting in the middle of
+  blocks**
+- a stop shuffled to the far bank left a leg **swimming across open water**:
+  nine legs in 528, every one of them past a corridor check that had passed
+
+Both are now validated on the finished stop list, and a line that fails is
+thrown away and redrawn. Neither cost anything measurable — line counts and
+generation attempts did not move.
+
+Making walking obey the streets turned out to *improve* the generator rather
+than strain it: strict cities went to 100% on the first attempt every time and
+the average race gained most of a change, from 2.25 to 2.9.
+
+---
+
+## The street view does not draw the network
+
+It used to lay every line out on the ground in full colour, which made the map
+on TAB redundant — you could plan a whole route from the street without ever
+opening the diagram, so the diagram was decoration and the game had one view
+instead of two.
+
+What the street gives you now is what a street gives you: roads, buildings,
+water, and a station sign with a row of pips for the lines that call there. You
+need that last part — standing at a stop you have to know what you can board —
+but it says nothing about where any of them GO, which is the map's job.
+
+---
+
 ## The river is load-bearing
 
 It looks like scenery. It is the reason the game has route planning in it.
@@ -174,7 +263,9 @@ consequences of other numbers rather than matters of taste:
 | `RACE.minTransfers` 2 | see "ask for the property" above |
 | `line.headway` | *derived*, not the mode's target. The fleet is a whole number, so the real headway is `cycle / fleet`. Take the target literally and you get a remainder, which plays as one long unexplainable gap every cycle |
 | `MODES.*.spacing` | what really separates the modes. It is the reason a bus is never far away and a train always is |
-| `MODES.*.effMin/Max` | non-overlapping by construction — see "the modes have to be guessable". Widen one until it touches its neighbour and the hierarchy silently stops being true |
+| `MODES.*.effMin/Max` | derived from each mode's nominal speed and non-overlapping by construction — see "the modes have to be guessable". Widen `BAND` until neighbours touch and the hierarchy silently stops being true |
+| `TEMPO` | taste, not design — but `dwell` and `intermissionSeconds` must stay in absolute seconds when it changes, and the par window has to widen slightly because of it |
+| `streets.width` 26 | also the tolerance for "is this leg on a street", so the generator's grid check and the player's collision agree by construction |
 
 `tests/city.test.ts` holds the race criteria; `tests/race.test.ts` rides the
 planned route against the real timetable and checks it can be followed at all.
@@ -236,6 +327,25 @@ Written down so they are choices rather than surprises:
 
 ---
 
+## The departure board is currently off
+
+Commented out, not deleted — in `index.html` and in `main.ts`, with
+`departures()` in shared/vehicles.ts still live and still tested.
+
+It listed what was leaving from under your feet and when. The argument for
+pulling it is that the map already shows every vehicle in the city live, so it
+was a convenience layer over information the player already has; without it you
+have to look at the network and work out what is coming, which is the game.
+
+The argument against, for when this is revisited: **the board was the only
+thing that ever told you which DIRECTION a vehicle was going.** On the map a
+tram approaching your stop and one leaving it look identical until you watch it
+for a second, and boarding the right line the wrong way is the most common way
+to lose one of these races. If the board stays out, direction has to become
+legible somewhere else.
+
+---
+
 ## Where it goes next
 
 In rough order of how much each would buy:
@@ -243,12 +353,14 @@ In rough order of how much each would buy:
 1. **Playtest with three people.** Everything above is measured, none of it is
    played. The specific unknown is whether *watching a rival's pip take the
    wrong bridge* is as good as it sounds.
-2. **A reason to look at other players.** Right now they are information you
+2. **Decide about direction.** See the departure board note above — this is the
+   one open question the current build has no answer to.
+3. **A reason to look at other players.** Right now they are information you
    can ignore. The nearest cheap idea: show which vehicle each rival is on, so
    a confident-looking rival is a hypothesis about the route.
-3. **Disruption.** One line suspended mid-round, announced on the boards, would
+4. **Disruption.** One line suspended mid-round, announced on the boards, would
    make the map worth re-reading halfway through. It has to stay a function of
    the seed and the clock.
-4. **Round-to-round structure.** Best of five across five cities, scoring by
+5. **Round-to-round structure.** Best of five across five cities, scoring by
    margin rather than position.
-5. **A line with a branch**, once "next stop" has a good answer in the HUD.
+6. **A line with a branch**, once "next stop" has a good answer in the HUD.

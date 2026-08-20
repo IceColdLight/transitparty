@@ -79,11 +79,6 @@ interpolation buffer.
 You start on a platform. Somewhere across the city is a stop with a gold ring
 around it. First one standing in that ring wins.
 
-**Read the departure board.** Bottom left, whenever you are standing at a stop.
-It shows what is coming, how many seconds away it is, and — the part people
-miss — **which direction it is going**. Boarding the right line the wrong way
-is how most races are lost.
-
 **Hold TAB and plan.** The map shows the whole network and every vehicle on it,
 live, with a legend down the left telling you what each line is, how fast it
 actually travels and how often it comes. It does not show you where you are
@@ -99,8 +94,17 @@ four lines cross at all. Getting to the far bank is a commitment, and picking
 the wrong crossing is a mistake you cannot walk off.
 
 **The doors matter.** A vehicle can only be boarded while it is standing at a
-stop with its doors open — five to fourteen seconds depending on what it is,
-and double that at a terminus. You cannot step off one in motion.
+stop with its doors open — four to eight seconds depending on what it is, and
+double that at a terminus. You cannot step off one in motion.
+
+**You walk on streets, not through buildings.** The city is a grid of blocks
+and you go round them, so the distance to a stop is rarely the distance to a
+stop. Holding a diagonal walks you round a corner without touching the
+keyboard again.
+
+**The street view does not show you the network.** Down at street level you get
+what you would actually get: roads, buildings, water, and a station sign with
+the lines that call at it. Where those lines *go* is on the map.
 
 ---
 
@@ -117,13 +121,20 @@ Each one is the right answer somewhere, and each one is a trap somewhere else.
 | | on foot | ~9 km/h | — | Never the plan. Crossing the city takes about twelve minutes against a par of five and a half. |
 
 Those speeds are what the lines really average end to end, dwells included —
-not a cruise figure nobody travels at. **The order is guaranteed:** every train
-line in every city is faster than every metro line, every metro faster than
-every tram, every tram faster than every bus. You never have to wonder.
+not a cruise figure nobody travels at, and quoted against walking pace because
+the city runs at three times real speed and "197 km/h" tells you nothing.
+**The order is guaranteed:** every train line in every city is faster than
+every metro line, every metro faster than every tram, every tram faster than
+every bus. You never have to wonder.
+
+**Only the train and the metro ignore the street grid** — one is elevated and
+one is underground, and between stations they are drawn faded to say so. Buses
+and trams are laid along the roads and turn corners, which makes them longer
+than they look on the diagram.
 
 **Door to door is a different question, and deliberately not ordered.** You
-wait over two minutes for a train, so over 800m the metro beats it and over
-2500m it does not. That crossover is the reason there are four modes instead
+wait longest for a train, so over 800m the metro beats it and over 2500m it
+does not. That crossover is the reason there are four modes instead
 of a speed slider, and it is why the map legend prints the frequency next to
 the speed.
 
@@ -133,13 +144,13 @@ the speed.
 
 The server generates a city, picks an origin and destination, and vets the
 result before anybody sees it. A race is only used if it **crosses the river**,
-needs **at least two changes**, takes **2½ to 6½ minutes** for a perfect
-passenger, and is **at least twice as fast by transit as on foot**. Most
+needs **at least two changes**, takes **50 seconds to 2½ minutes** for a
+perfect passenger, and is **at least twice as fast by transit as on foot**. Most
 randomly generated pairs of stops fail at least one of those, so most of them
 are thrown away.
 
-A round ends when everybody has finished or nine minutes have passed. Then
-there are fourteen seconds of results and a brand new city.
+A round ends when everybody has finished or three and a half minutes have
+passed. Then there are eleven seconds of results and a brand new city.
 
 The HUD shows `par` — what a planner reckons the trip takes assuming you turn
 up at each stop not knowing when the next vehicle leaves. You have the live
@@ -170,24 +181,27 @@ city gets.
 
 ```
 src/shared/     imported by the server, the client AND the tests
-  constants.ts    every tuned number, once
+  constants.ts    every tuned number, once — including TEMPO
   rng.ts          seeded PRNG — the generator may not touch Math.random
+  streets.ts      the grid: the only walkable surface, and the pedestrian graph
   river.ts        the water, the bridges, and what may cross them
-  city.ts         the generator: river → bridges → hub → train → metro → tram → bus
+  city.ts         the generator: streets → river → bridges → hub → the lines
   routing.ts      a route planner, used to vet generated cities
   vehicles.ts     the timetable as a pure function of (city, time)
   schematic.ts    the map's distortion, and why it has one
-  movement.ts     walking, and what the river does to it
+  movement.ts     walking, and what buildings and the river do to it
   types.ts
 src/server/     authoritative: owns where players are, and nothing else
-src/client/     main loop, the geographic view, the schematic overlay
-tests/          six suites, zero dependencies
+src/client/     main loop, the street view, the schematic overlay
+tools/shots.ts  renders both views to PNG with no browser
+tests/          seven suites, zero dependencies
 ```
 
-`npm test` runs all six. They check design properties, not code paths — that
+`npm test` runs all seven. They check design properties, not code paths — that
 every generated race needs two changes, that riding always beats walking, that
-the map lies about distance but never about the order of the stops, that you
-cannot walk across the water and can across a bridge.
+every bus leg runs along a street and no station is stranded inside a block,
+that the map lies about distance but never tangles a line with itself, and that
+you cannot walk across the water but can across a bridge.
 
 `CLAUDE.md` is the working notes: what was tried, what was measured, and what
 had to be pulled back out.

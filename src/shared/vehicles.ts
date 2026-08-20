@@ -18,6 +18,7 @@
  * therefore get a double dwell, which is the turnaround, and which is why a
  * terminus is the one place you can reliably catch something you just missed.
  */
+import { TEMPO } from './constants.js';
 import type { City, Line, Vehicle } from './types.js';
 
 /** Seconds into this vehicle's cycle. */
@@ -114,7 +115,7 @@ export function remainingStops(city: City, v: Vehicle): number[] {
  * Next departures from a stop, soonest first — the departure board, and the
  * one piece of information the whole game is played on.
  */
-export function departures(city: City, stopId: number, time: number, horizon = 600): {
+export function departures(city: City, stopId: number, time: number, horizon = 600 / TEMPO): {
   line: number; vehicle: string; in: number; towards: number; boardable: boolean;
 }[] {
   const out: { line: number; vehicle: string; in: number; towards: number; boardable: boolean }[] = [];

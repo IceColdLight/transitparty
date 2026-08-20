@@ -131,7 +131,7 @@ function tick(dt: number) {
     const c = clients.get(p.id);
     const w = vel.get(p.id) ?? { vx: 0, vy: 0 };
     const walker: Walker = { x: p.x, y: p.y, vx: w.vx, vy: w.vy };
-    stepWalk(walker, c?.wx ?? 0, c?.wy ?? 0, dt, city.river);
+    stepWalk(walker, c?.wx ?? 0, c?.wy ?? 0, dt, city.streets, city.river);
     p.x = walker.x; p.y = walker.y;
     vel.set(p.id, { vx: walker.vx, vy: walker.vy });
     if (c) p.facing = c.facing;

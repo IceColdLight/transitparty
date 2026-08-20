@@ -8,7 +8,7 @@
  * departure board in front of them is doing. If the plan cannot be followed,
  * or following it is slower than walking, there is no game here.
  */
-import { RACE, WALK } from '../src/shared/constants.js';
+import { RACE, TEMPO, WALK } from '../src/shared/constants.js';
 import { buildCity } from '../src/shared/city.js';
 import { bestRoute, walkNeighbours } from '../src/shared/routing.js';
 import { allVehicles, departures, remainingStops, vehicleById } from '../src/shared/vehicles.js';
@@ -31,7 +31,7 @@ function ride(city: City, t0: number): { time: number; waited: number; boards: n
 
     const line = city.lines[leg.line];
     let run = -1, boardedAt = -1;
-    for (let dt = 0; dt <= 900 && run < 0; dt += 0.5) {
+    for (let dt = 0; dt <= 900 / TEMPO && run < 0; dt += 0.5) {
       for (let k = 0; k < line.fleet; k++) {
         const v = vehicleById(city, `${line.id}.${k}`, t + dt)!;
         // The doors have to be open AND it has to be going your way. Boarding
@@ -47,7 +47,7 @@ function ride(city: City, t0: number): { time: number; waited: number; boards: n
     boards++;
 
     let arrived = -1;
-    for (let dt = 0.5; dt <= 900; dt += 0.5) {
+    for (let dt = 0.5; dt <= 900 / TEMPO; dt += 0.5) {
       const v = vehicleById(city, `${line.id}.${run}`, boardedAt + dt)!;
       if (v.atStop === leg.to) { arrived = boardedAt + dt; break; }
     }
@@ -103,12 +103,13 @@ check('and par is not wildly wrong in either direction',
 describe('the start of a round');
 
 const firstWait = cities.map((c) => {
-  const rows = departures(c, c.origin, 0, 600);
+  const rows = departures(c, c.origin, 0, 600 / TEMPO);
   return rows.length ? rows[0].in : 999;
 });
 note(`first departure at the origin: avg ${avg(firstWait).toFixed(0)}s, worst ${Math.max(...firstWait).toFixed(0)}s`);
 check('nobody starts a round staring at an empty platform',
-  Math.max(...firstWait) < 100, `worst ${Math.max(...firstWait).toFixed(0)}s`);
+  Math.max(...firstWait) < 100 / TEMPO,
+  `worst ${Math.max(...firstWait).toFixed(0)}s, budget ${(100 / TEMPO).toFixed(0)}s`);
 
 describe('boarding');
 
@@ -132,7 +133,7 @@ check('a vehicle with its doors open is exactly on its platform',
   offPlatform === 0, `${offPlatform} of ${samples} samples off`);
 
 /** Starting later must not change the answer's shape — no lucky t=0. */
-const late = cities.slice(0, 12).map((c, i) => ride(c, 137.5 + i * 41));
+const late = cities.slice(0, 12).map((c, i) => ride(c, (137.5 + i * 41) / TEMPO));
 check('the race works from any point in the timetable',
   late.every((r) => r !== null), `${late.filter(Boolean).length}/12`);
 note(`late starts: avg ${avg(late.filter(Boolean).map((r) => r!.time)).toFixed(0)}s`);

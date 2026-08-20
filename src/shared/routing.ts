@@ -12,16 +12,20 @@
  * departures, so a good player beats this estimate — that is the point. `par`
  * is a sanity bound, not a target.
  */
-import { CITY, WALK } from './constants.js';
-import { type River, illegalCrossing } from './river.js';
+import { WALK } from './constants.js';
+import type { River } from './river.js';
+import { type Streets, type WalkGraph, buildWalkGraph, walkDistances } from './streets.js';
 import type { Line, Stop } from './types.js';
 
+export type Net = { stops: Stop[]; lines: Line[]; river: River; streets: Streets };
+
 /**
- * `river` is optional only so a test can ask what the network would be like
- * without it. In the game it is always present, and leaving it out quietly
- * turns the city back into the mesh that river.ts exists to prevent.
+ * The pedestrian graph for a network. Build it once and hand it to everything
+ * that asks a walking question — it is the same graph the player's legs obey.
  */
-export type Net = { stops: Stop[]; lines: Line[]; river?: River };
+export function pedestrian(net: Net): WalkGraph {
+  return buildWalkGraph(net.streets, net.river, net.stops);
+}
 
 export type Leg =
   | { kind: 'walk'; from: number; to: number; time: number }
@@ -35,26 +39,29 @@ export type Route = {
   legs: Leg[];
 };
 
-/** Straight-line walking time between two stops, in seconds. */
-export function walkTime(net: Net, a: number, b: number): number {
-  const p = net.stops[a], q = net.stops[b];
-  return Math.hypot(p.x - q.x, p.y - q.y) / WALK.speed;
+/**
+ * Walking time between two stops, in seconds — along the STREETS, not across
+ * the blocks between them. Two stops ninety metres apart can be a four hundred
+ * metre walk if the ninety metres is a building, and a planner that measures
+ * with a ruler quotes journeys nobody can make.
+ */
+export function walkTime(net: Net, a: number, b: number, g?: WalkGraph): number {
+  const graph = g ?? pedestrian(net);
+  const d = walkDistances(graph, graph.stopNode[a])[graph.stopNode[b]];
+  return d / WALK.speed;
 }
 
 /** Stops reachable on foot from each stop, with the walk already costed. */
-export function walkNeighbours(net: Net): { to: number; time: number }[][] {
+export function walkNeighbours(net: Net, g?: WalkGraph): { to: number; time: number }[][] {
+  const graph = g ?? pedestrian(net);
   const out: { to: number; time: number }[][] = net.stops.map(() => []);
   for (let i = 0; i < net.stops.length; i++) {
-    for (let j = i + 1; j < net.stops.length; j++) {
-      const d = Math.hypot(net.stops[i].x - net.stops[j].x, net.stops[i].y - net.stops[j].y);
-      if (d > WALK.transferMax) continue;
-      // Two stops can be 90m apart and still be an hour's walk from each
-      // other if the water is between them. The planner has to know that or
-      // it will confidently route you into a riverbank.
-      if (net.river && illegalCrossing(net.river, net.stops[i], net.stops[j], CITY.bridgeRadius)) continue;
-      const t = d / WALK.speed;
-      out[i].push({ to: j, time: t });
-      out[j].push({ to: i, time: t });
+    const dist = walkDistances(graph, graph.stopNode[i], WALK.transferMax);
+    for (let j = 0; j < net.stops.length; j++) {
+      if (i === j) continue;
+      const d = dist[graph.stopNode[j]];
+      if (!(d <= WALK.transferMax)) continue;
+      out[i].push({ to: j, time: d / WALK.speed });
     }
   }
   return out;
